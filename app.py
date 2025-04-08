@@ -6,7 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 from llmproxy import generate
-from duckduckgo_search import duckduckgo_search  # Function-based API
+import duckduckgo_search  # Import the whole module
 
 app = Flask(__name__)
 
@@ -33,7 +33,8 @@ session_dict = load_sessions()
 
 # --- TOOL FUNCTIONS ---
 def websearch(query):
-    results = duckduckgo_search(query, max_results=5)
+    # Call the function from the module via its full path.
+    results = duckduckgo_search.duckduckgo_search(query, max_results=5)
     return [r["href"] for r in results]
 
 def get_page(url):
@@ -49,16 +50,16 @@ def get_page(url):
     return f"Failed to fetch {url}, status code: {response.status_code}"
 
 def youtube_search(query):
-    results = duckduckgo_search(f"{query} site:youtube.com", max_results=5)
+    results = duckduckgo_search.duckduckgo_search(f"{query} site:youtube.com", max_results=5)
     return [r["href"] for r in results if "youtube.com/watch" in r["href"]]
 
 def tiktok_search(query):
-    results = duckduckgo_search(f"{query} site:tiktok.com", max_results=5)
+    results = duckduckgo_search.duckduckgo_search(f"{query} site:tiktok.com", max_results=5)
     return [r["href"] for r in results if "tiktok.com" in r["href"]]
 
 def instagram_search(query):
     hashtag = query.replace(" ", "")
-    results = duckduckgo_search(f"#{hashtag} site:instagram.com", max_results=5)
+    results = duckduckgo_search.duckduckgo_search(f"#{hashtag} site:instagram.com", max_results=5)
     return [r["href"] for r in results if "instagram.com" in r["href"]]
 
 # --- TOOL PARSER ---
@@ -297,7 +298,7 @@ def main():
         }
         save_sessions(session_dict)
 
-    # If user types "weekly update", trigger the weekly update and return its results directly
+    # If user types "weekly update", trigger the update and return results in chat
     if message.lower() == "weekly update":
         if session_dict[user].get("onboarding_stage") == "done":
             update_response = weekly_update_internal(user)
@@ -316,6 +317,7 @@ def main():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001)
+
 
 
 
