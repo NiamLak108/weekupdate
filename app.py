@@ -6,7 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 from llmproxy import generate
-from duckduckgo_search import DDGS
+from duckduckgo_search import DuckDuckGoSearch
 
 app = Flask(__name__)
 
