@@ -272,7 +272,7 @@ def first_interaction(message, user):
         return {"text": "📆 Onboarding complete! You can now access daily and weekly updates."}
 
 # --- MAIN CHAT ROUTE ---
-@app.route('/query', methods=['POST'])
+@app.route('/', methods=['POST'])
 def main():
     global session_dict
     data = request.get_json()
