@@ -56,4 +56,4 @@ tzdata==2025.1
 urllib3==2.3.0
 uvicorn==0.34.0
 gunicorn==23.0.0
-duckduckgo_search==2.7.3
+duckduckgo_search==8.0.0
