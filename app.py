@@ -6,7 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 from llmproxy import generate
-from duckduckgo_search.ddg_search import DuckDuckGoSearch  # Updated import
+from duckduckgo_search import ddg   # Use the function-based API
 
 app = Flask(__name__)
 
@@ -33,8 +33,7 @@ session_dict = load_sessions()
 
 # --- TOOL FUNCTIONS ---
 def websearch(query):
-    ddg = DuckDuckGoSearch()
-    results = ddg.text(query, max_results=5)
+    results = ddg(query, max_results=5)
     return [r["href"] for r in results]
 
 def get_page(url):
@@ -50,19 +49,16 @@ def get_page(url):
     return f"Failed to fetch {url}, status code: {response.status_code}"
 
 def youtube_search(query):
-    ddg = DuckDuckGoSearch()
-    results = ddg.text(f"{query} site:youtube.com", max_results=5)
+    results = ddg(f"{query} site:youtube.com", max_results=5)
     return [r["href"] for r in results if "youtube.com/watch" in r["href"]]
 
 def tiktok_search(query):
-    ddg = DuckDuckGoSearch()
-    results = ddg.text(f"{query} site:tiktok.com", max_results=5)
+    results = ddg(f"{query} site:tiktok.com", max_results=5)
     return [r["href"] for r in results if "tiktok.com" in r["href"]]
 
 def instagram_search(query):
     hashtag = query.replace(" ", "")
-    ddg = DuckDuckGoSearch()
-    results = ddg.text(f"#{hashtag} site:instagram.com", max_results=5)
+    results = ddg(f"#{hashtag} site:instagram.com", max_results=5)
     return [r["href"] for r in results if "instagram.com" in r["href"]]
 
 # --- TOOL PARSER ---
@@ -78,7 +74,7 @@ def agent_weekly_update(user_info, health_info):
     """
     Create the system message using the session values and call the LLM agent.
     user_info is a dict containing keys like 'name', 'news_pref', etc.
-    health_info is a dict containing health-related info (e.g. condition).
+    health_info is a dict containing health-related info (e.g., condition).
     """
     system = f"""
 You are an AI agent designed to handle weekly health content updates for users with specific health conditions.
@@ -141,9 +137,8 @@ Each time you search, make sure the search query is different from the previous 
 @app.route('/weekly_update', methods=['GET'])
 def weekly_update():
     """
-    Endpoint to trigger the weekly update. This uses session data to
-    generate the personalized content, runs the selected search tool,
-    and returns the result.
+    Endpoint to trigger the weekly update. This uses session data to generate the personalized content,
+    runs the selected search tool, and returns the result.
     """
     # For demo purposes, use a pre-defined user key.
     user_name = request.args.get("user", "default_user")
@@ -187,7 +182,7 @@ def weekly_update():
 
         print(f"🔁 Final tool to execute: {tool_call}")
 
-        # Execute the tool call. (Caution: using eval is potentially unsafe.)
+        # Execute the tool call. (Caution: using eval can be unsafe.)
         results = eval(tool_call)
         output = "\n".join(f"• {item}" for item in results)
         return jsonify({
