@@ -6,7 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 from llmproxy import generate
-import duckduckgo_search  # Import the module
+from duckduckgo_search import ddg  # Import the actual search function
 
 app = Flask(__name__)
 
@@ -33,7 +33,7 @@ session_dict = load_sessions()
 
 # --- TOOL FUNCTIONS ---
 def websearch(query):
-    results = duckduckgo_search.duckduckgo_search(query, max_results=5)
+    results = ddg(query, max_results=5)
     return [r["href"] for r in results]
 
 def get_page(url):
@@ -49,16 +49,16 @@ def get_page(url):
     return f"Failed to fetch {url}, status code: {response.status_code}"
 
 def youtube_search(query):
-    results = duckduckgo_search.duckduckgo_search(f"{query} site:youtube.com", max_results=5)
+    results = ddg(f"{query} site:youtube.com", max_results=5)
     return [r["href"] for r in results if "youtube.com/watch" in r["href"]]
 
 def tiktok_search(query):
-    results = duckduckgo_search.duckduckgo_search(f"{query} site:tiktok.com", max_results=5)
+    results = ddg(f"{query} site:tiktok.com", max_results=5)
     return [r["href"] for r in results if "tiktok.com" in r["href"]]
 
 def instagram_search(query):
     hashtag = query.replace(" ", "")
-    results = duckduckgo_search.duckduckgo_search(f"#{hashtag} site:instagram.com", max_results=5)
+    results = ddg(f"#{hashtag} site:instagram.com", max_results=5)
     return [r["href"] for r in results if "instagram.com" in r["href"]]
 
 # --- TOOL PARSER ---
@@ -316,6 +316,7 @@ def main():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001)
+
 
 
 
