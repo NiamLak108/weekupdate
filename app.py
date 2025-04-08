@@ -6,7 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 from llmproxy import generate
-from duckduckgo_search import DuckDuckGoSearch
+from duckduckgo_search.ddg_search import DuckDuckGoSearch  # Updated import
 
 app = Flask(__name__)
 
@@ -37,7 +37,6 @@ def websearch(query):
     results = ddg.text(query, max_results=5)
     return [r["href"] for r in results]
 
-
 def get_page(url):
     headers = {"User-Agent": "Mozilla/5.0"}
     response = requests.get(url, headers=headers)
@@ -60,7 +59,6 @@ def tiktok_search(query):
     results = ddg.text(f"{query} site:tiktok.com", max_results=5)
     return [r["href"] for r in results if "tiktok.com" in r["href"]]
 
-
 def instagram_search(query):
     hashtag = query.replace(" ", "")
     ddg = DuckDuckGoSearch()
@@ -79,7 +77,7 @@ def extract_tool(text):
 def agent_weekly_update(user_info, health_info):
     """
     Create the system message using the session values and call the LLM agent.
-    user_info is a dict containing keys like 'name', 'preferred_platform', and 'news_pref'.
+    user_info is a dict containing keys like 'name', 'news_pref', etc.
     health_info is a dict containing health-related info (e.g. condition).
     """
     system = f"""
@@ -147,8 +145,7 @@ def weekly_update():
     generate the personalized content, runs the selected search tool,
     and returns the result.
     """
-    # For demo purposes, we simply use a pre-defined user key.
-    # In production you would likely authenticate and use the current user's session.
+    # For demo purposes, use a pre-defined user key.
     user_name = request.args.get("user", "default_user")
     if user_name not in session_dict:
         return jsonify({"error": "User not found in session store."}), 404
@@ -159,10 +156,9 @@ def weekly_update():
     user_info = {
         "name": user_name,
         "news_sources": user_session.get("news_sources", ["bbc.com", "nytimes.com"]),
-        # Here, we use the 'news_pref' field from onboarding – ensure it matches the tool names
         "news_pref": user_session.get("news_pref", "Research News")
     }
-    # Health profile information (e.g., condition) coming from session data; you may need to adjust key names.
+    # Health profile information (e.g., condition)
     health_info = {
         "condition": user_session.get("condition", "unknown condition")
     }
@@ -175,11 +171,10 @@ def weekly_update():
         # Extract the tool call, for example: youtube_search("crohn's anti-inflammatory meals")
         tool_call = extract_tool(agent_response)
 
-        # If no valid tool call is provided, use a fallback using minimal logic.
+        # If no valid tool call is provided, use a fallback.
         if not tool_call:
             print("⚠️ No valid tool call found. Using fallback.")
             condition = health_info.get("condition")
-            # Map onboarding news preference to a tool function name.
             pref = user_info.get("news_pref", "Research News").lower()
             tool_map = {
                 'youtube': f'youtube_search("{condition} tips")',
@@ -187,13 +182,12 @@ def weekly_update():
                 'instagram reel': f'instagram_search("{condition} tips")',
                 'research news': f'websearch("{condition} tips")'
             }
-            # Normalize key lookup.
             key = pref if pref in tool_map else "research news"
             tool_call = tool_map.get(key)
 
         print(f"🔁 Final tool to execute: {tool_call}")
 
-        # Execute the tool call. WARNING: Using eval can be insecure! Be sure to validate or sandbox inputs.
+        # Execute the tool call. (Caution: using eval is potentially unsafe.)
         results = eval(tool_call)
         output = "\n".join(f"• {item}" for item in results)
         return jsonify({
@@ -212,8 +206,8 @@ def first_interaction(message, user):
     questions = {
         "condition": "🏪 What condition do you have? (Type II Diabetes, Crohn’s disease, or both)",
         "age": "👋 Hi, I'm DocBot — your health assistant!\n"
-                "I'll help you track symptoms, remind you about meds 💊, and send you health tips 📰.\n\n"
-                "Let’s start with a few quick questions.\n 🎂 How old are you?",
+               "I'll help you track symptoms, remind you about meds 💊, and send you health tips 📰.\n\n"
+               "Let’s start with a few quick questions.\n 🎂 How old are you?",
         "weight": "⚖️ What's your weight (in kg)?",
         "medications": "💊 What medications are you currently taking?",
         "emergency_contact": "📱 Who should we contact in case of emergency? [email]",
@@ -247,7 +241,6 @@ def first_interaction(message, user):
     elif stage == "emergency_contact":
         session_dict[user]["emergency_contact"] = message
         session_dict[user]["onboarding_stage"] = "news_pref"
-        # Sample buttons for response options
         buttons = [
             {"type": "button", "text": "🎥 YouTube", "msg": "YouTube", "msg_in_chat_window": True, "button_id": "youtube_button"},
             {"type": "button", "text": "📸 IG Reel", "msg": "Instagram Reel", "msg_in_chat_window": True, "button_id": "insta_button"},
@@ -295,7 +288,6 @@ def main():
     print("Current session:", session_dict.get(user, {}))
     print("User:", user)
 
-    # Restart handling if requested
     if "restart" in message.lower():
         session_dict[user] = {
             "session_id": f"{user}-session",
@@ -312,7 +304,6 @@ def main():
         response = first_interaction("", user)
         return jsonify({"text": "🔄 Restarted onboarding. " + response.get("text", "")})
 
-    # Initialize user session if not present
     if user not in session_dict:
         session_dict[user] = {
             "session_id": f"{user}-session",
@@ -327,7 +318,6 @@ def main():
         }
         save_sessions(session_dict)
 
-    # During onboarding, use the first_interaction flow; otherwise, use the daily update.
     if session_dict[user]["onboarding_stage"] != "done":
         response = first_interaction(message, user)
     else:
@@ -338,3 +328,4 @@ def main():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001)
+
