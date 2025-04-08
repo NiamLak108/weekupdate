@@ -140,7 +140,7 @@ Each time you search, make sure the search query is different from the previous 
 def weekly_update_internal(user):
     """
     Generate the weekly update for a given user.
-    Returns a dictionary with the update results.
+    Returns a dictionary with the update results including a "text" key for display.
     """
     if user not in session_dict:
         return {"text": "User not found in session."}
@@ -177,7 +177,11 @@ def weekly_update_internal(user):
         print(f"🔁 Final tool to execute: {tool_call}")
         results = eval(tool_call)
         output = "\n".join(f"• {item}" for item in results)
+        text_response = (f"Agent response: {agent_response}\n"
+                         f"Executed tool: {tool_call}\n"
+                         f"Results:\n{output}")
         return {
+            "text": text_response,
             "agent_response": agent_response,
             "executed_tool": tool_call,
             "results": output
@@ -186,7 +190,7 @@ def weekly_update_internal(user):
         import traceback
         print("❌ Exception during weekly update:")
         traceback.print_exc()
-        return {"error": str(e)}
+        return {"text": f"Error: {str(e)}"}
 
 # --- ONBOARDING FUNCTIONS ---
 def first_interaction(message, user):
@@ -320,6 +324,7 @@ def main():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001)
+
 
 
 
