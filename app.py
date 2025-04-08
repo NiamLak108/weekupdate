@@ -6,7 +6,7 @@ import requests
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 from llmproxy import generate
-from duckduckgo_search import duckduckgo_search  # Use the function-based API
+from duckduckgo_search import duckduckgo_search  # Function-based API
 
 app = Flask(__name__)
 
@@ -34,7 +34,7 @@ session_dict = load_sessions()
 # --- TOOL FUNCTIONS ---
 def websearch(query):
     results = duckduckgo_search(query, max_results=5)
-    # results is expected to be a list of dicts containing at least an "href" key
+    # Expecting results as a list of dicts containing "href"
     return [r["href"] for r in results]
 
 def get_page(url):
@@ -42,7 +42,7 @@ def get_page(url):
     response = requests.get(url, headers=headers)
     if response.status_code == 200:
         soup = BeautifulSoup(response.text, "html.parser")
-        # Remove non-content tags for a cleaner text
+        # Remove non-content tags for cleaner text
         for tag in soup(["script", "style", "header", "footer", "nav", "aside"]):
             tag.extract()
         text = soup.get_text(separator=" ", strip=True)
@@ -73,9 +73,8 @@ def extract_tool(text):
 # --- WEEKLY UPDATE FUNCTION ---
 def agent_weekly_update(user_info, health_info):
     """
-    Create the system message using the session values and call the LLM agent.
-    user_info is a dict containing keys like 'name', 'news_pref', etc.
-    health_info is a dict containing health-related info (e.g., condition).
+    Create the system message based on user and health info, then call the LLM agent.
+    The agent returns a tool call (e.g., youtube_search("gut health smoothies")).
     """
     system = f"""
 You are an AI agent designed to handle weekly health content updates for users with specific health conditions.
@@ -134,40 +133,33 @@ Each time you search, make sure the search query is different from the previous 
     print(f"🔍 Raw agent response: {response}")
     return response['response']
 
-# --- WEEKLY UPDATE ROUTE ---
-@app.route('/weekly_update', methods=['GET'])
-def weekly_update():
+# --- WEEKLY UPDATE HELPER FUNCTION ---
+def weekly_update_internal(user):
     """
-    Endpoint to trigger the weekly update. This uses session data to generate the personalized content,
-    runs the selected search tool, and returns the result.
+    Helper function to generate the weekly update for a given user.
+    Returns a dictionary with the update results.
     """
-    # For demo purposes, use a pre-defined user key.
-    user_name = request.args.get("user", "default_user")
-    if user_name not in session_dict:
-        return jsonify({"error": "User not found in session store."}), 404
-
-    user_session = session_dict[user_name]
+    if user not in session_dict:
+        return {"text": "User not found in session."}
     
-    # Prepare user information for the weekly update
+    user_session = session_dict[user]
     user_info = {
-        "name": user_name,
+        "name": user,
         "news_sources": user_session.get("news_sources", ["bbc.com", "nytimes.com"]),
         "news_pref": user_session.get("news_pref", "Research News")
     }
-    # Health profile information (e.g., condition)
     health_info = {
         "condition": user_session.get("condition", "unknown condition")
     }
     
     try:
-        # Get the agent response containing a tool call.
         agent_response = agent_weekly_update(user_info, health_info)
         print(f"✅ Final agent response: {agent_response}")
 
-        # Extract the tool call, for example: youtube_search("crohn's anti-inflammatory meals")
+        # Extract tool call from the agent response
         tool_call = extract_tool(agent_response)
 
-        # If no valid tool call is provided, use a fallback.
+        # Fallback if no valid tool call is provided
         if not tool_call:
             print("⚠️ No valid tool call found. Using fallback.")
             condition = health_info.get("condition")
@@ -183,93 +175,30 @@ def weekly_update():
 
         print(f"🔁 Final tool to execute: {tool_call}")
 
-        # Execute the tool call. (Caution: using eval can be unsafe.)
+        # Execute the tool call (note: using eval has security implications; ensure inputs are trusted)
         results = eval(tool_call)
         output = "\n".join(f"• {item}" for item in results)
-        return jsonify({
+        return {
             "agent_response": agent_response,
             "executed_tool": tool_call,
             "results": output
-        })
+        }
     except Exception as e:
         import traceback
         print("❌ Exception during weekly update:")
         traceback.print_exc()
-        return jsonify({"error": str(e)}), 500
+        return {"error": str(e)}
 
-# --- ONBOARDING FUNCTIONS FOR CHATBOT ---
-def first_interaction(message, user):
-    questions = {
-        "condition": "🏪 What condition do you have? (Type II Diabetes, Crohn’s disease, or both)",
-        "age": "👋 Hi, I'm DocBot — your health assistant!\n"
-               "I'll help you track symptoms, remind you about meds 💊, and send you health tips 📰.\n\n"
-               "Let’s start with a few quick questions.\n 🎂 How old are you?",
-        "weight": "⚖️ What's your weight (in kg)?",
-        "medications": "💊 What medications are you currently taking?",
-        "emergency_contact": "📱 Who should we contact in case of emergency? [email]",
-        "news_pref": "📰 What kind of weekly health updates would you like?\nOptions: Instagram Reel 📱, TikTok 🎵, or Research News 🧪"
-    }
-
-    stage = session_dict[user].get("onboarding_stage", "condition")
-
-    if stage == "condition":
-        session_dict[user]["condition"] = message
-        session_dict[user]["onboarding_stage"] = "age"
-        return {"text": questions["age"]}
-
-    elif stage == "age":
-        if not message.isdigit():
-            return {"text": "❗ Please enter a valid age (a number)."}
-        session_dict[user]["age"] = int(message)
-        session_dict[user]["onboarding_stage"] = "weight"
-        return {"text": questions["weight"]}
-
-    elif stage == "weight":
-        session_dict[user]["weight"] = message
-        session_dict[user]["onboarding_stage"] = "medications"
-        return {"text": questions["medications"]}
-
-    elif stage == "medications":
-        session_dict[user]["medications"] = [med.strip() for med in message.split(",")]
-        session_dict[user]["onboarding_stage"] = "emergency_contact"
-        return {"text": questions["emergency_contact"]}
-
-    elif stage == "emergency_contact":
-        session_dict[user]["emergency_contact"] = message
-        session_dict[user]["onboarding_stage"] = "news_pref"
-        buttons = [
-            {"type": "button", "text": "🎥 YouTube", "msg": "YouTube", "msg_in_chat_window": True, "button_id": "youtube_button"},
-            {"type": "button", "text": "📸 IG Reel", "msg": "Instagram Reel", "msg_in_chat_window": True, "button_id": "insta_button"},
-            {"type": "button", "text": "🎵 TikTok", "msg": "TikTok", "msg_in_chat_window": True, "button_id": "tiktok_button"},
-            {"type": "button", "text": "🧪 Research", "msg": "Research News", "msg_in_chat_window": True, "button_id": "research_button"}
-        ]
-        return {
-            "text": "📰 What kind of weekly health updates would you like?",
-            "attachments": [{"collapsed": False, "color": "#e3e3e3", "actions": buttons}]
-        }
-
-    elif stage == "news_pref":
-        valid_options = ["YouTube", "Instagram Reel", "TikTok", "Research News"]
-        if message not in valid_options:
-            return {"text": "Please click one of the buttons above to continue."}
-        session_dict[user]["news_pref"] = message
-        session_dict[user]["onboarding_stage"] = "condition1"
-        buttons = [
-            {"type": "button", "text": "Crohn's", "msg": "Crohn's", "msg_in_chat_window": True, "button_id": "choose_condition_crohns"},
-            {"type": "button", "text": "Type II Diabetes", "msg": "Type II Diabetes", "msg_in_chat_window": True, "button_id": "choose_condition_diabetes"}
-        ]
-        return {
-            "text": "🏪 What condition do you have?",
-            "attachments": [{"collapsed": False, "color": "#e3e3e3", "actions": buttons}]
-        }
-    
-    elif stage == "condition1":
-        valid_conditions = ["Crohn's", "Type II Diabetes"]
-        if message not in valid_conditions:
-            return {"text": "Please click one of the buttons above to continue."}
-        session_dict[user]["condition"] = message
-        session_dict[user]["onboarding_stage"] = "done"
-        return {"text": "📆 Onboarding complete! You can now access daily and weekly updates."}
+# --- WEEKLY UPDATE ROUTE (GET) ---
+@app.route('/weekly_update', methods=['GET'])
+def weekly_update_get():
+    """
+    GET endpoint for weekly update. (You can still use this if needed.)
+    """
+    user_name = request.args.get("user", "default_user")
+    if user_name not in session_dict:
+        return jsonify({"error": "User not found in session store."}), 404
+    return jsonify(weekly_update_internal(user_name))
 
 # --- MAIN CHAT ROUTE ---
 @app.route('/', methods=['POST'])
@@ -284,6 +213,7 @@ def main():
     print("Current session:", session_dict.get(user, {}))
     print("User:", user)
 
+    # If the user requests "restart", reinitialize the session.
     if "restart" in message.lower():
         session_dict[user] = {
             "session_id": f"{user}-session",
@@ -300,6 +230,7 @@ def main():
         response = first_interaction("", user)
         return jsonify({"text": "🔄 Restarted onboarding. " + response.get("text", "")})
 
+    # Initialize session if user is new
     if user not in session_dict:
         session_dict[user] = {
             "session_id": f"{user}-session",
@@ -314,15 +245,27 @@ def main():
         }
         save_sessions(session_dict)
 
+    # If user types "weekly update", trigger the weekly update and return its result.
+    if message.lower() == "weekly update":
+        # Ensure user has completed onboarding
+        if session_dict[user].get("onboarding_stage") == "done":
+            update_response = weekly_update_internal(user)
+            return jsonify(update_response)
+        else:
+            return jsonify({"text": "Please complete onboarding before requesting a weekly update."})
+    
+    # During onboarding, use the first_interaction flow.
     if session_dict[user]["onboarding_stage"] != "done":
         response = first_interaction(message, user)
     else:
-        response = {"text": "You're fully onboarded. To trigger your weekly update, visit /weekly_update?user=" + user}
+        # If fully onboarded but message is not a weekly update command, you can prompt:
+        response = {"text": "You're fully onboarded. Type 'weekly update' to get your update."}
 
     save_sessions(session_dict)
     return jsonify(response)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001)
+
 
 
