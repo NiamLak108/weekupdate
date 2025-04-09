@@ -177,9 +177,7 @@ def weekly_update_internal(user):
         print(f"🔁 Final tool to execute: {tool_call}")
         results = eval(tool_call)
         output = "\n".join(f"• {item}" for item in results)
-        text_response = (f"Agent response: {agent_response}\n"
-                         f"Executed tool: {tool_call}\n"
-                         f"Results:\n{output}")
+        text_response = f"Here is your weekly health content digest\n{tool_call}:\n{output}"
         return {
             "text": text_response,
             "agent_response": agent_response,
