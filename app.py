@@ -76,9 +76,10 @@ def extract_tool(text):
 # --- WEEKLY UPDATE FUNCTION ---
 def agent_weekly_update(user_info, health_info):
     """
-    Create a system message using the user and health info, then call the LLM agent.
-    The agent returns a tool call (e.g., youtube_search("gut health smoothies")).
+    Generate five unique content search queries for this week's update using the original system prompt,
+    then return exactly five distinct tool calls.
     """
+    # Original, in-depth system prompt preserved, with added instruction for five calls
     system = f"""
 You are an AI agent designed to handle weekly health content updates for users with specific health conditions.
 
@@ -119,76 +120,61 @@ Parameters: query
 Example usage: websearch("best probiotics for gut health site:bbc.com")
 Example usage: websearch("latest Crohn's breakthroughs site:nytimes.com")
 
-ONLY respond with one tool call. Do NOT explain or add any extra text.
-Make your query specific, relevant to the condition, and useful.
-
-Each time you search, make sure the search query is different from the previous week's content.
+ONLY respond with five unique tool calls, one per line, and do NOT add any extra text.
+Make your queries each specifically tailored to the condition, varied, and distinct from each other.
 """
     response = generate(
         model='4o-mini',
         system=system,
-        query="What should I send this user this week?",
+        query="Generate the five tool calls.",
         temperature=0.9,
         lastk=30,
         session_id='HEALTH_UPDATE_AGENT',
         rag_usage=False
     )
-    print(f"🔍 Raw agent response: {response}")
+    # Return raw response containing five tool calls
     return response['response']
 
 # --- WEEKLY UPDATE INTERNAL HELPER ---
 def weekly_update_internal(user):
     """
-    Generate the weekly update for a given user.
-    Returns a dictionary with the update results including a "text" key for display.
+    Generate the weekly update for a given user with 5 unique queries and return links.
     """
     if user not in session_dict:
         return {"text": "User not found in session."}
-    
+
     user_session = session_dict[user]
     user_info = {
         "name": user,
-        "news_sources": user_session.get("news_sources", ["bbc.com", "nytimes.com"]),
+        "news_sources": user_session.get("news_sources", []),
         "news_pref": user_session.get("news_pref", "Research News")
     }
-    health_info = {
-        "condition": user_session.get("condition", "unknown condition")
-    }
-    
-    try:
-        agent_response = agent_weekly_update(user_info, health_info)
-        print(f"✅ Final agent response: {agent_response}")
+    health_info = {"condition": user_session.get("condition", "unknown condition")}
 
-        tool_call = extract_tool(agent_response)
+    # Ask agent for five tool calls
+    raw_calls = agent_weekly_update(user_info, health_info)
 
-        if not tool_call:
-            print("⚠️ No valid tool call found. Using fallback.")
-            condition = health_info.get("condition")
-            pref = user_info.get("news_pref", "Research News").lower()
-            tool_map = {
-                'youtube': f'youtube_search("{condition} tips")',
-                'tiktok': f'tiktok_search("{condition} tips")',
-                'instagram reel': f'instagram_search("{condition} tips")',
-                'research news': f'websearch("{condition} tips")'
-            }
-            key = pref if pref in tool_map else "research news"
-            tool_call = tool_map.get(key)
+    # Parse all tool calls (youTube, TikTok, Instagram, websearch)
+    calls = re.findall(
+        r'(youtube_search\("[^"]+"\)|tiktok_search\("[^"]+"\)|instagram_search\("[^"]+"\)|websearch\("[^"]+"\))',
+        raw_calls
+    )
 
-        print(f"🔁 Final tool to execute: {tool_call}")
-        results = eval(tool_call)
-        output = "\n".join(f"• {item}" for item in results)
-        text_response = f"Here is your weekly health content digest\n{tool_call}:\n{output}"
-        return {
-            "text": text_response,
-            "agent_response": agent_response,
-            "executed_tool": tool_call,
-            "results": output
-        }
-    except Exception as e:
-        import traceback
-        print("❌ Exception during weekly update:")
-        traceback.print_exc()
-        return {"text": f"Error: {str(e)}"}
+    results = []
+    for call in calls[:5]:
+        try:
+            links = eval(call)
+            top_link = links[0] if links else 'No results found'
+        except Exception:
+            top_link = 'Error executing query'
+        results.append({"query": call, "link": top_link})
+
+    # Format output
+    lines = [f"• {item['query']}: {item['link']}" for item in results]
+    text = "Here is your weekly health content digest with 5 unique searches:\n" + "\n".join(lines)
+
+    return {"text": text, "queries": calls, "results": results}
+
 
 # --- ONBOARDING FUNCTIONS ---
 def first_interaction(message, user):
