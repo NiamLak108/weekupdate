@@ -79,7 +79,7 @@ def agent_weekly_update(user_info, health_info):
     Generate five unique content search queries for this week's update using the original system prompt,
     then return exactly five distinct tool calls.
     """
-    # Original, in-depth system prompt preserved, with added instruction for five calls
+    # Preserve original in-depth system prompt
     system = f"""
 You are an AI agent designed to handle weekly health content updates for users with specific health conditions.
 
@@ -134,13 +134,12 @@ Make your queries each specifically tailored to the condition, varied, and disti
     )
     return response['response']
 
+
 # --- WEEKLY UPDATE INTERNAL HELPER ---
 def weekly_update_internal(user):
     """
-    Generate the weekly update for a given user with 5 unique queries and return links.
+    Generate the weekly update for a given user with 5 unique queries and return their top link.
     """
-    import random
-
     if user not in session_dict:
         return {"text": "User not found in session."}
 
@@ -152,47 +151,49 @@ def weekly_update_internal(user):
     }
     health_info = {"condition": user_session.get("condition", "unknown condition")}
 
-    # Ask agent for tool calls
-    raw_calls = agent_weekly_update(user_info, health_info)
+    # Step 1: Fetch initial batch of calls
+    raw = agent_weekly_update(user_info, health_info)
+    calls = re.findall(r'(youtube_search\("[^"]+"\)|tiktok_search\("[^"]+"\)|instagram_search\("[^"]+"\)|websearch\("[^"]+"\))', raw)
 
-    # Parse all tool calls
-    calls = re.findall(
-        r'(youtube_search\("[^"]+"\)|tiktok_search\("[^"]+"\)|instagram_search\("[^"]+"\)|websearch\("[^"]+"\))',
-        raw_calls
-    )
+    # Step 2: If fewer than 5 unique, iteratively request more distinct calls
+    seen = set(calls)
+    while len(calls) < 5:
+        prompt = f"Generate one additional unique tool call distinct from these: {', '.join(seen)}"
+        extra = generate(
+            model='4o-mini',
+            system=system,
+            query=prompt,
+            temperature=0.9,
+            lastk=30,
+            session_id='HEALTH_UPDATE_AGENT',
+            rag_usage=False
+        )['response']
+        match = re.search(r'(youtube_search\("[^"]+"\)|tiktok_search\("[^"]+"\)|instagram_search\("[^"]+"\)|websearch\("[^"]+"\))', extra)
+        if match:
+            call = match.group(0)
+            if call not in seen:
+                seen.add(call)
+                calls.append(call)
+                continue
+        # Break if no new unique call
+        break
 
-    # Fallback: ensure we have 5 distinct calls
-    if len(calls) < 5:
-        base = health_info.get('condition', '')
-        tools = ['youtube_search', 'tiktok_search', 'instagram_search', 'websearch']
-        # simple fallback queries
-        extras = [
-            f"{base} best practices",
-            f"{base} recipes",
-            f"{base} workout routines",
-            f"{base} lifestyle tips",
-            f"{base} latest research"
-        ]
-        idx = 0
-        while len(calls) < 5 and idx < len(extras):
-            tool = tools[len(calls) % len(tools)]
-            calls.append(f'{tool}("{extras[idx]}")')
-            idx += 1
-
+    # Step 3: Execute and collect top links
     results = []
     for call in calls[:5]:
         try:
             links = eval(call)
-            top_link = links[0] if links else 'No results found'
+            top = links[0] if links else 'No results found'
         except Exception:
-            top_link = 'Error executing query'
-        results.append({"query": call, "link": top_link})
+            top = 'Error executing query'
+        results.append({"query": call, "link": top})
 
-    # Format output
-    lines = [f"• {item['query']}: {item['link']}" for item in results]
+    # Step 4: Format response
+    lines = [f"• {r['query']}: {r['link']}" for r in results]
     text = "Here is your weekly health content digest with 5 unique searches:\n" + "\n".join(lines)
 
     return {"text": text, "queries": calls[:5], "results": results}
+
 
 
 # --- ONBOARDING FUNCTIONS ---
