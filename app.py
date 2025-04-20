@@ -126,13 +126,12 @@ Make your queries each specifically tailored to the condition, varied, and disti
     response = generate(
         model='4o-mini',
         system=system,
-        query="Generate the five tool calls.",
+        query="Generate five unique tool calls, one per line.",
         temperature=0.9,
         lastk=30,
         session_id='HEALTH_UPDATE_AGENT',
         rag_usage=False
     )
-    # Return raw response containing five tool calls
     return response['response']
 
 # --- WEEKLY UPDATE INTERNAL HELPER ---
@@ -140,6 +139,8 @@ def weekly_update_internal(user):
     """
     Generate the weekly update for a given user with 5 unique queries and return links.
     """
+    import random
+
     if user not in session_dict:
         return {"text": "User not found in session."}
 
@@ -151,14 +152,32 @@ def weekly_update_internal(user):
     }
     health_info = {"condition": user_session.get("condition", "unknown condition")}
 
-    # Ask agent for five tool calls
+    # Ask agent for tool calls
     raw_calls = agent_weekly_update(user_info, health_info)
 
-    # Parse all tool calls (youTube, TikTok, Instagram, websearch)
+    # Parse all tool calls
     calls = re.findall(
         r'(youtube_search\("[^"]+"\)|tiktok_search\("[^"]+"\)|instagram_search\("[^"]+"\)|websearch\("[^"]+"\))',
         raw_calls
     )
+
+    # Fallback: ensure we have 5 distinct calls
+    if len(calls) < 5:
+        base = health_info.get('condition', '')
+        tools = ['youtube_search', 'tiktok_search', 'instagram_search', 'websearch']
+        # simple fallback queries
+        extras = [
+            f"{base} best practices",
+            f"{base} recipes",
+            f"{base} workout routines",
+            f"{base} lifestyle tips",
+            f"{base} latest research"
+        ]
+        idx = 0
+        while len(calls) < 5 and idx < len(extras):
+            tool = tools[len(calls) % len(tools)]
+            calls.append(f'{tool}("{extras[idx]}")')
+            idx += 1
 
     results = []
     for call in calls[:5]:
@@ -173,7 +192,7 @@ def weekly_update_internal(user):
     lines = [f"• {item['query']}: {item['link']}" for item in results]
     text = "Here is your weekly health content digest with 5 unique searches:\n" + "\n".join(lines)
 
-    return {"text": text, "queries": calls, "results": results}
+    return {"text": text, "queries": calls[:5], "results": results}
 
 
 # --- ONBOARDING FUNCTIONS ---
