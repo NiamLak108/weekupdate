@@ -29,6 +29,7 @@ def save_sessions(sessions):
 session_dict = load_sessions()
 
 # --- DUMMY TEST USER (skip onboarding) ---
+
 def _init_test_user():
     session_dict.setdefault("test_user", {
         "session_id": "test_user-session",
@@ -79,7 +80,6 @@ TOOL_MAP = {
 }
 
 def agent_weekly_update(func_name, condition):
-    # Generate exactly three unique calls for the specified tool and condition
     prompt = (
         f"Generate exactly three unique calls using only {func_name}."
         f" Each call should look like: {func_name}(\"{condition} ...\")."
@@ -101,7 +101,6 @@ def weekly_update_internal(user):
     if not sess:
         return {"text": "User not found."}
 
-    # If real user's condition is empty, fall back to test_user
     pref = sess.get("news_pref")
     condition = sess.get("condition") or session_dict.get("test_user", {}).get("condition", "")
 
@@ -128,15 +127,16 @@ def weekly_update_internal(user):
             except Exception:
                 top = "Error fetching results"
         else:
+            query_str = condition
             top = "Invalid call"
-        results.append({"query": call, "link": top})
+        results.append({"query": query_str, "link": top})
 
     # Ensure exactly three entries (pad if necessary)
     while len(results) < 3:
-        results.append({"query": f"{func_name}(\"{condition}\")", "link": "No call generated"})
+        results.append({"query": condition, "link": "No call generated"})
 
-    # Format the response
-    text_lines = [f"• {r['query']}: {r['link']}" for r in results]
+    # Format the response without function names
+    text_lines = [f"• {item['query']}: {item['link']}" for item in results]
     return {
         "text": "Here is your weekly health content digest with 3 unique searches:\n" + "\n".join(text_lines),
         "results": results
@@ -144,7 +144,6 @@ def weekly_update_internal(user):
 
 # --- ONBOARDING FUNCTIONS ---
 def first_interaction(message, user):
-    # Existing onboarding logic should go here
     return {"text": "..."}
 
 # --- MAIN ROUTE ---
@@ -155,10 +154,7 @@ def main():
     message = data.get("text", "").strip()
     user = data.get("user_name", "Unknown")
 
-    # Reload sessions
     session_dict = load_sessions()
-
-    # Initialize new real users if needed
     if user not in session_dict:
         session_dict[user] = {
             "session_id": f"{user}-session",
@@ -173,7 +169,6 @@ def main():
         }
         save_sessions(session_dict)
 
-    # 1) Trigger content-type choice
     if message.lower() == "weekly update":
         buttons = [
             {"type": "button", "text": "🎥 YouTube", "msg": "YouTube", "msg_in_chat_window": True},
@@ -186,14 +181,12 @@ def main():
             "attachments": [{"collapsed": False, "color": "#e3e3e3", "actions": buttons}]
         })
 
-    # 2) User selects a channel and fetches updates
     if message in TOOL_MAP:
         session_dict[user]["news_pref"] = message
         session_dict[user]["onboarding_stage"] = "done"
         save_sessions(session_dict)
         return jsonify(weekly_update_internal(user))
 
-    # 3) Onboarding or default reply
     if session_dict[user].get("onboarding_stage") != "done":
         response = first_interaction(message, user)
     else:
