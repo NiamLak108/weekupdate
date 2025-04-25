@@ -1,12 +1,11 @@
 import os
 import re
 import json
-import random
 import requests
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 from llmproxy import generate
-from duckduckgo_search import DDGS  # Use the DDGS class for searches
+from duckduckgo_search import DDGS
 
 app = Flask(__name__)
 
@@ -15,26 +14,26 @@ SESSION_FILE = "session_store.json"
 
 def load_sessions():
     if os.path.exists(SESSION_FILE):
-        with open(SESSION_FILE, "r") as file:
+        with open(SESSION_FILE, "r") as f:
             try:
-                return json.load(file)
+                return json.load(f)
             except json.JSONDecodeError:
                 return {}
     return {}
 
 
-def save_sessions(session_dict):
-    with open(SESSION_FILE, "w") as file:
-        json.dump(session_dict, file, indent=4)
+def save_sessions(sessions):
+    with open(SESSION_FILE, "w") as f:
+        json.dump(sessions, f, indent=4)
 
 session_dict = load_sessions()
 
-# --- DUMMY TEST SESSION FOR WEEKLY-UPDATE ---
+# --- DUMMY TEST SESSION FOR QUICK WEEKLY-UPDATE TESTING ---
 def _init_test_user():
     session_dict.setdefault("test_user", {
         "session_id": "test_user-session",
         "onboarding_stage": "done",
-        "condition": "Crohn’s disease",
+        "condition": "Crohn's disease",       # use straight apostrophe
         "news_pref": None,
         "news_sources": ["bbc.com", "nytimes.com"]
     })
@@ -42,91 +41,97 @@ def _init_test_user():
 
 _init_test_user()
 
-# --- TOOL FUNCTIONS ---
+# --- CONTENT TOOLS ---
 def websearch(query):
     with DDGS() as ddgs:
         results = ddgs.text(query, max_results=5)
-    return [r["href"] for r in results]
+    return [r.get("href") for r in results]
 
 
 def youtube_search(query):
     with DDGS() as ddgs:
         results = ddgs.text(f"{query} site:youtube.com", max_results=5)
-    return [r["href"] for r in results if "youtube.com/watch" in r["href"]]
+    return [r.get("href") for r in results if "youtube.com/watch" in r.get("href", "")]
 
 
 def tiktok_search(query):
     with DDGS() as ddgs:
         results = ddgs.text(f"{query} site:tiktok.com", max_results=5)
-    return [r["href"] for r in results if "tiktok.com" in r["href"]]
+    return [r.get("href") for r in results if "tiktok.com" in r.get("href", "")]
 
 
 def instagram_search(query):
-    hashtag = query.replace(" ", "")
+    tag = query.replace(" ", "")
     with DDGS() as ddgs:
-        results = ddgs.text(f"#{hashtag} site:instagram.com", max_results=5)
-    return [r["href"] for r in results if "instagram.com" in r["href"]]
+        results = ddgs.text(f"#{tag} site:instagram.com", max_results=5)
+    return [r.get("href") for r in results if "instagram.com" in r.get("href", "")]
 
-# --- WEEKLY UPDATE FUNCTIONS ---
+# --- WEEKLY UPDATE GENERATION ---
+TOOL_MAP = {
+    "YouTube": "youtube_search",
+    "TikTok": "tiktok_search",
+    "Instagram Reel": "instagram_search",
+    "Research News": "websearch"
+}
+
 def agent_weekly_update(user_info, health_info):
-    # Determine which tool to use based on user preference
     pref = user_info.get("news_pref")
-    tool_map = {
-        "YouTube": "youtube_search",
-        "TikTok": "tiktok_search",
-        "Instagram Reel": "instagram_search",
-        "Research News": "websearch"
-    }
-    tool = tool_map.get(pref, "websearch")
+    tool = TOOL_MAP.get(pref, "websearch")
     condition = health_info.get("condition", "health")
 
     system_prompt = f"""
 You are an AI agent generating weekly updates for a user with {condition}.
 Use only the {tool} tool to generate exactly five unique calls.
-Each call should search for "{condition}" plus a relevant phrase.
+Each call should search for '{condition}' plus a relevant phrase.
 Respond with one tool call per line, e.g.:
-{tool}("{condition} management tips")
+{tool}('{condition} management tips')
 """
-    response = generate(
-        model='4o-mini',
+    resp = generate(
+        model="4o-mini",
         system=system_prompt,
         query="Generate five unique tool calls, one per line.",
         temperature=0.8,
         lastk=30,
-        session_id='HEALTH_UPDATE_AGENT',
+        session_id="HEALTH_UPDATE_AGENT",
         rag_usage=False
     )
-    return response['response']
+    return resp.get("response", "")
 
 
 def weekly_update_internal(user):
-    if user not in session_dict:
+    sess = session_dict.get(user)
+    if not sess:
         return {"text": "User not found."}
-    user_sess = session_dict[user]
-    user_info = {"news_pref": user_sess.get("news_pref")}
-    health_info = {"condition": user_sess.get("condition")}
+
+    pref = sess.get("news_pref")
+    tool = TOOL_MAP.get(pref, "websearch")
+    user_info = {"news_pref": pref}
+    health_info = {"condition": sess.get("condition")}
 
     raw = agent_weekly_update(user_info, health_info)
-    calls = re.findall(r'(youtube_search\("[^"]+"\)|tiktok_search\("[^"]+"\)|instagram_search\("[^"]+"\)|websearch\("[^"]+"\))', raw)
+    # extract only calls for the chosen tool
+    pattern = re.compile(rf'({tool}\("[^"]+"\))')
+    calls = pattern.findall(raw)
 
     results = []
     for call in calls[:5]:
         try:
             links = eval(call)
-            top = links[0] if links else 'No results'
+            top = links[0] if links else "No results found"
         except Exception:
-            top = 'Error'
+            top = "Error fetching results"
         results.append({"query": call, "link": top})
 
     lines = [f"• {r['query']}: {r['link']}" for r in results]
-    return {"text": "Here is your weekly health content digest with 5 unique searches:\n" + "\n".join(lines)}
+    text = "Here is your weekly health content digest with 5 unique searches:\n" + "\n".join(lines)
+    return {"text": text, "results": results}
 
 # --- ONBOARDING FUNCTIONS (unchanged) ---
 def first_interaction(message, user):
-    # ... your existing onboarding logic ...
+    # ... existing onboarding logic ...
     return {"text": "..."}
 
-# --- MAIN CHAT ROUTE ---
+# --- MAIN ROUTE ---
 @app.route('/', methods=['POST'])
 def main():
     global session_dict
@@ -136,7 +141,7 @@ def main():
 
     session_dict = load_sessions()
 
-    # Initialize new users
+    # initialize new real users
     if user not in session_dict:
         session_dict[user] = {
             "session_id": f"{user}-session",
@@ -151,27 +156,25 @@ def main():
         }
         save_sessions(session_dict)
 
-    # 1) User asks for weekly update → show choice buttons
+    # 1) Trigger choice of channel
     if message.lower() == "weekly update":
         buttons = [
             {"type":"button","text":"🎥 YouTube","msg":"YouTube","msg_in_chat_window":True},
             {"type":"button","text":"📸 Instagram Reel","msg":"Instagram Reel","msg_in_chat_window":True},
             {"type":"button","text":"🎵 TikTok","msg":"TikTok","msg_in_chat_window":True},
-            {"type":"button","text":"🧪 Research News","msg":"Research News","msg_in_chat_window":True},
+            {"type":"button","text":"🧪 Research News","msg":"Research News","msg_in_chat_window":True}
         ]
-        return jsonify({
-            "text": "Choose your weekly-update content type:",
-            "attachments": [{"collapsed": False, "color": "#e3e3e3", "actions": buttons}]
-        })
+        return jsonify({"text": "Choose your weekly-update content type:",
+                        "attachments": [{"collapsed": False, "color": "#e3e3e3", "actions": buttons}]})
 
-    # 2) User selects content type → generate update
-    if message in ["YouTube", "Instagram Reel", "TikTok", "Research News"]:
+    # 2) User picks channel
+    if message in TOOL_MAP:
         session_dict[user]["news_pref"] = message
         session_dict[user]["onboarding_stage"] = "done"
         save_sessions(session_dict)
         return jsonify(weekly_update_internal(user))
 
-    # 3) Continue onboarding or normal prompt
+    # 3) Onboarding or default prompt
     if session_dict[user].get("onboarding_stage") != "done":
         response = first_interaction(message, user)
     else:
@@ -182,6 +185,7 @@ def main():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001)
+
 
 
 
