@@ -21,7 +21,6 @@ def load_sessions():
                 return {}
     return {}
 
-
 def save_sessions(sessions):
     with open(SESSION_FILE, "w") as f:
         json.dump(sessions, f, indent=4)
@@ -48,18 +47,15 @@ def websearch(query):
         results = ddgs.text(query, max_results=5)
     return [r.get("href") for r in results]
 
-
 def youtube_search(query):
     with DDGS() as ddgs:
         results = ddgs.text(f"{query} site:youtube.com", max_results=5)
     return [r.get("href") for r in results if "youtube.com/watch" in r.get("href", "")]
 
-
 def tiktok_search(query):
     with DDGS() as ddgs:
         results = ddgs.text(f"{query} site:tiktok.com", max_results=5)
     return [r.get("href") for r in results if "tiktok.com" in r.get("href", "")]
-
 
 def instagram_search(query):
     with DDGS() as ddgs:
@@ -100,14 +96,15 @@ def agent_weekly_update(func_name, condition):
     )
     return resp.get("response", "")
 
-
 def weekly_update_internal(user):
     sess = session_dict.get(user)
     if not sess:
         return {"text": "User not found."}
 
+    # If real user's condition is empty, fall back to test_user
     pref = sess.get("news_pref")
-    condition = sess.get("condition")
+    condition = sess.get("condition") or session_dict.get("test_user", {}).get("condition", "")
+
     func_name, func = TOOL_MAP.get(pref, ("websearch", websearch))
 
     # Step 1: generate raw calls
@@ -125,8 +122,6 @@ def weekly_update_internal(user):
         m = re.match(rf"{func_name}\(\"(.+)\"\)", call)
         if m:
             query_str = m.group(1)
-            print("Querying:", func_name, query_str)
-            print("Raw links:", func(query_str))
             try:
                 links = func(query_str)
                 top = links[0] if links else "No results found"
@@ -142,8 +137,10 @@ def weekly_update_internal(user):
 
     # Format the response
     text_lines = [f"• {r['query']}: {r['link']}" for r in results]
-    return {"text": "Here is your weekly health content digest with 3 unique searches:\n" + "\n".join(text_lines),
-            "results": results}
+    return {
+        "text": "Here is your weekly health content digest with 3 unique searches:\n" + "\n".join(text_lines),
+        "results": results
+    }
 
 # --- ONBOARDING FUNCTIONS ---
 def first_interaction(message, user):
@@ -158,7 +155,10 @@ def main():
     message = data.get("text", "").strip()
     user = data.get("user_name", "Unknown")
 
+    # Reload sessions
     session_dict = load_sessions()
+
+    # Initialize new real users if needed
     if user not in session_dict:
         session_dict[user] = {
             "session_id": f"{user}-session",
@@ -173,6 +173,7 @@ def main():
         }
         save_sessions(session_dict)
 
+    # 1) Trigger content-type choice
     if message.lower() == "weekly update":
         buttons = [
             {"type": "button", "text": "🎥 YouTube", "msg": "YouTube", "msg_in_chat_window": True},
@@ -185,12 +186,14 @@ def main():
             "attachments": [{"collapsed": False, "color": "#e3e3e3", "actions": buttons}]
         })
 
+    # 2) User selects a channel and fetches updates
     if message in TOOL_MAP:
         session_dict[user]["news_pref"] = message
         session_dict[user]["onboarding_stage"] = "done"
         save_sessions(session_dict)
         return jsonify(weekly_update_internal(user))
 
+    # 3) Onboarding or default reply
     if session_dict[user].get("onboarding_stage") != "done":
         response = first_interaction(message, user)
     else:
@@ -201,6 +204,7 @@ def main():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001)
+
 
 
 
