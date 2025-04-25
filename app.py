@@ -125,6 +125,8 @@ def weekly_update_internal(user):
         m = re.match(rf"{func_name}\(\"(.+)\"\)", call)
         if m:
             query_str = m.group(1)
+            print("Querying:", func_name, query_str)
+            print("Raw links:", func(query_str))
             try:
                 links = func(query_str)
                 top = links[0] if links else "No results found"
