@@ -26,9 +26,10 @@ def save_sessions(sessions):
     with open(SESSION_FILE, "w") as f:
         json.dump(sessions, f, indent=4)
 
+# Load or initialize the sessions dict
 session_dict = load_sessions()
 
-# --- DUMMY TEST USER ---
+# --- DUMMY TEST USER (skip onboarding) ---
 def _init_test_user():
     session_dict.setdefault("test_user", {
         "session_id": "test_user-session",
@@ -75,7 +76,7 @@ TOOL_MAP = {
 }
 
 def agent_weekly_update(tool_name, condition):
-    # tool_name is one of the keys in TOOL_MAP; condition is string
+    # Generate five unique calls for the specified tool and condition
     prompt = (
         f"Generate exactly five unique calls using only {tool_name}."
         f" Each call should look like: {tool_name}(\"{condition} ...\")."
@@ -100,22 +101,22 @@ def weekly_update_internal(user):
 
     pref = sess.get("news_pref")
     condition = sess.get("condition")
-    # mapping
+    # Determine the function based on user preference
     func = TOOL_MAP.get(pref, websearch)
-    tool_name = [k for k,v in TOOL_MAP.items() if v==func][0]
+    tool_name = next((k for k, v in TOOL_MAP.items() if v == func), "websearch")
 
+    # Step 1: generate raw calls
     raw = agent_weekly_update(tool_name, condition)
-    # extract lines starting with tool_name(
+    # Filter lines for the chosen tool
     lines = [line.strip() for line in raw.splitlines() if line.strip().startswith(f"{tool_name}(")]
-    # keep unique in order
+    # Deduplicate while preserving order
     seen = []
     for l in lines:
         if l not in seen:
             seen.append(l)
     calls = seen[:5]
 
-    # if fewer than 5, pad with additional generation (optional)
-    # now execute calls
+    # Step 2: execute and collect top links
     results = []
     for call in calls:
         m = re.match(rf"{tool_name}\(\"(.+)\"\)", call)
@@ -130,17 +131,18 @@ def weekly_update_internal(user):
             top = "Invalid call"
         results.append({"query": call, "link": top})
 
-    # ensure 5 entries
+    # Ensure exactly 5 entries
     while len(results) < 5:
         results.append({"query": f"{tool_name}(\"{condition}\")", "link": "No call generated"})
 
+    # Format the response
     text_lines = [f"• {r['query']}: {r['link']}" for r in results]
     return {"text": "Here is your weekly health content digest with 5 unique searches:\n" + "\n".join(text_lines),
             "results": results}
 
-# --- ONBOARDING FUNCTIONS (unchanged) ---
+# --- ONBOARDING FUNCTIONS ---
 def first_interaction(message, user):
-    # ... existing logic ...
+    # Existing onboarding logic should go here
     return {"text": "..."}
 
 # --- MAIN ROUTE ---
@@ -151,26 +153,45 @@ def main():
     message = data.get("text", "").strip()
     user = data.get("user_name", "Unknown")
 
+    # Reload sessions
     session_dict = load_sessions()
-    # init real users
+
+    # Initialize new real users if needed
     if user not in session_dict:
-        session_dict[user] = { ... }  # existing init
+        session_dict[user] = {
+            "session_id": f"{user}-session",
+            "onboarding_stage": "condition",
+            "condition": "",
+            "age": 0,
+            "weight": 0,
+            "medications": [],
+            "emergency_contact": "",
+            "news_pref": "",
+            "news_sources": ["bbc.com", "nytimes.com"]
+        }
         save_sessions(session_dict)
 
+    # 1) Trigger content-type choice
     if message.lower() == "weekly update":
-        buttons = [{"type":"button","text":"🎥 YouTube","msg":"YouTube","msg_in_chat_window":True},
-                   {"type":"button","text":"📸 Instagram Reel","msg":"Instagram Reel","msg_in_chat_window":True},
-                   {"type":"button","text":"🎵 TikTok","msg":"TikTok","msg_in_chat_window":True},
-                   {"type":"button","text":"🧪 Research News","msg":"Research News","msg_in_chat_window":True}]
-        return jsonify({"text": "Choose your weekly-update content type:",
-                        "attachments": [{"collapsed": False, "color": "#e3e3e3", "actions": buttons}]})
+        buttons = [
+            {"type": "button", "text": "🎥 YouTube", "msg": "YouTube", "msg_in_chat_window": True},
+            {"type": "button", "text": "📸 Instagram Reel", "msg": "Instagram Reel", "msg_in_chat_window": True},
+            {"type": "button", "text": "🎵 TikTok", "msg": "TikTok", "msg_in_chat_window": True},
+            {"type": "button", "text": "🧪 Research News", "msg": "Research News", "msg_in_chat_window": True}
+        ]
+        return jsonify({
+            "text": "Choose your weekly-update content type:",
+            "attachments": [{"collapsed": False, "color": "#e3e3e3", "actions": buttons}]
+        })
 
-    if message in TOOL_MAP:
+    # 2) User selects a channel and fetches updates
+    if message in TOOL_MAP.keys():
         session_dict[user]["news_pref"] = message
         session_dict[user]["onboarding_stage"] = "done"
         save_sessions(session_dict)
         return jsonify(weekly_update_internal(user))
 
+    # 3) Onboarding or default reply
     if session_dict[user].get("onboarding_stage") != "done":
         response = first_interaction(message, user)
     else:
@@ -181,6 +202,7 @@ def main():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001)
+
 
 
 
