@@ -62,17 +62,11 @@ def tiktok_search(query):
 
 
 def instagram_search(query):
-    """
-    Search Instagram for posts related to the query using DuckDuckGo.
-    Returns up to 5 Instagram URLs (posts, reels, profiles).
-    """
     with DDGS() as ddgs:
-        # Use a site filter to target Instagram domains
         results = ddgs.text(f"{query} site:instagram.com", max_results=10)
     links = []
     for r in results:
         url = r.get("href", "")
-        # Include only valid Instagram content URLs
         if url and "instagram.com" in url:
             links.append(url)
         if len(links) >= 5:
@@ -80,7 +74,7 @@ def instagram_search(query):
     return links
 
 # --- WEEKLY UPDATE GENERATION ---
-# Map user-visible channel to (function_name, function)
+# Map channel label to (function name, function)
 TOOL_MAP = {
     "YouTube": ("youtube_search", youtube_search),
     "TikTok": ("tiktok_search", tiktok_search),
@@ -89,9 +83,9 @@ TOOL_MAP = {
 }
 
 def agent_weekly_update(func_name, condition):
-    # Generate five unique calls for the specified tool and condition
+    # Generate exactly three unique calls for the specified tool
     prompt = (
-        f"Generate exactly five unique calls using only {func_name}."
+        f"Generate exactly three unique calls using only {func_name}."
         f" Each call should look like: {func_name}(\"{condition} ...\")."
         f" The search phrase must include '{condition}'. Return one call per line."
     )
@@ -114,19 +108,16 @@ def weekly_update_internal(user):
 
     pref = sess.get("news_pref")
     condition = sess.get("condition")
-    # Determine the function and its name based on user preference
     func_name, func = TOOL_MAP.get(pref, ("websearch", websearch))
 
     # Step 1: generate raw calls
     raw = agent_weekly_update(func_name, condition)
-    # Filter lines for the chosen function name
     lines = [line.strip() for line in raw.splitlines() if line.strip().startswith(f"{func_name}(")]
-    # Deduplicate while preserving order
     seen = []
     for l in lines:
         if l not in seen:
             seen.append(l)
-    calls = seen[:5]
+    calls = seen[:3]
 
     # Step 2: execute and collect top links
     results = []
@@ -143,18 +134,18 @@ def weekly_update_internal(user):
             top = "Invalid call"
         results.append({"query": call, "link": top})
 
-    # Ensure exactly 5 entries (pad if necessary)
-    while len(results) < 5:
+    # Step 3: pad to three entries if needed
+    while len(results) < 3:
         results.append({"query": f"{func_name}(\"{condition}\")", "link": "No call generated"})
 
     # Format the response
     text_lines = [f"• {r['query']}: {r['link']}" for r in results]
-    return {"text": "Here is your weekly health content digest with 5 unique searches:\n" + "\n".join(text_lines),
+    return {"text": "Here is your weekly health content digest with 3 unique searches:\n" + "\n".join(text_lines),
             "results": results}
 
 # --- ONBOARDING FUNCTIONS ---
 def first_interaction(message, user):
-    # Existing onboarding logic should go here
+    # Existing onboarding logic goes here
     return {"text": "..."}
 
 # --- MAIN ROUTE ---
@@ -165,10 +156,7 @@ def main():
     message = data.get("text", "").strip()
     user = data.get("user_name", "Unknown")
 
-    # Reload sessions
     session_dict = load_sessions()
-
-    # Initialize new real users if needed
     if user not in session_dict:
         session_dict[user] = {
             "session_id": f"{user}-session",
@@ -183,7 +171,6 @@ def main():
         }
         save_sessions(session_dict)
 
-    # 1) Trigger content-type choice
     if message.lower() == "weekly update":
         buttons = [
             {"type": "button", "text": "🎥 YouTube", "msg": "YouTube", "msg_in_chat_window": True},
@@ -196,14 +183,12 @@ def main():
             "attachments": [{"collapsed": False, "color": "#e3e3e3", "actions": buttons}]
         })
 
-    # 2) User selects a channel and fetches updates
     if message in TOOL_MAP:
         session_dict[user]["news_pref"] = message
         session_dict[user]["onboarding_stage"] = "done"
         save_sessions(session_dict)
         return jsonify(weekly_update_internal(user))
 
-    # 3) Onboarding or default reply
     if session_dict[user].get("onboarding_stage") != "done":
         response = first_interaction(message, user)
     else:
