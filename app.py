@@ -74,7 +74,7 @@ def instagram_search(query):
     return links
 
 # --- WEEKLY UPDATE GENERATION ---
-# Map channel label to (function name, function)
+# Map user-visible channel to (function_name, function)
 TOOL_MAP = {
     "YouTube": ("youtube_search", youtube_search),
     "TikTok": ("tiktok_search", tiktok_search),
@@ -83,7 +83,7 @@ TOOL_MAP = {
 }
 
 def agent_weekly_update(func_name, condition):
-    # Generate exactly three unique calls for the specified tool
+    # Generate exactly three unique calls for the specified tool and condition
     prompt = (
         f"Generate exactly three unique calls using only {func_name}."
         f" Each call should look like: {func_name}(\"{condition} ...\")."
@@ -134,7 +134,7 @@ def weekly_update_internal(user):
             top = "Invalid call"
         results.append({"query": call, "link": top})
 
-    # Step 3: pad to three entries if needed
+    # Ensure exactly three entries (pad if necessary)
     while len(results) < 3:
         results.append({"query": f"{func_name}(\"{condition}\")", "link": "No call generated"})
 
@@ -145,7 +145,7 @@ def weekly_update_internal(user):
 
 # --- ONBOARDING FUNCTIONS ---
 def first_interaction(message, user):
-    # Existing onboarding logic goes here
+    # Existing onboarding logic should go here
     return {"text": "..."}
 
 # --- MAIN ROUTE ---
@@ -199,6 +199,7 @@ def main():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001)
+
 
 
 
