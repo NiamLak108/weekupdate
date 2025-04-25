@@ -29,6 +29,7 @@ def save_sessions(sessions):
 session_dict = load_sessions()
 
 # --- DUMMY TEST USER ---
+
 def _init_test_user():
     session_dict.setdefault("test_user", {
         "session_id": "test_user-session",
@@ -64,7 +65,7 @@ def instagram_search(query):
     tag = query.replace(" ", "")
     with DDGS() as ddgs:
         results = ddgs.text(f"#{tag} site:instagram.com", max_results=5)
-    return [r.get("href") for r in results if "instagram.com" in r.get("href", "")]
+    return [r.get("href") for r in results if "instagram.com" in r.get("href", "")]  
 
 # --- WEEKLY UPDATE GENERATION ---
 TOOL_MAP = {
@@ -82,9 +83,9 @@ def agent_weekly_update(user_info, health_info):
     system_prompt = f"""
 You are an AI agent generating weekly updates for a user with {condition}.
 Use only the {tool} tool to generate exactly five unique calls.
-Each call should search for '{condition}' plus a relevant phrase.
+Each call should search for \"{condition}\" plus a relevant phrase.
 Respond with one tool call per line, e.g.:
-{tool}('{condition} management tips')
+{tool}(\"{condition} management tips\")
 """
     resp = generate(
         model="4o-mini",
@@ -115,17 +116,17 @@ def weekly_update_internal(user):
 
     # Step 2: ensure exactly 5 unique calls
     seen = set(calls)
-    system_prompt = f"""
+    extra_prompt = f"""
 You are an AI agent generating weekly updates for a user with {sess.get('condition')}.
 Use only the {tool} tool to generate exactly one additional unique call.
 Do not repeat these: {', '.join(seen)}
 Respond with one tool call, e.g.:
-{tool}('{sess.get('condition')} meal ideas')
+{tool}(\"{sess.get('condition')} meal ideas\")
 """
     while len(calls) < 5:
         extra = generate(
             model="4o-mini",
-            system=system_prompt,
+            system=extra_prompt,
             query="Generate one additional unique tool call.",
             temperature=0.8,
             lastk=30,
@@ -166,11 +167,12 @@ Respond with one tool call, e.g.:
     return {"text": text, "results": results}
 
 # --- ONBOARDING FUNCTIONS ---
+
 def first_interaction(message, user):
     # ... existing onboarding logic ...
     return {"text": "..."}
 
-# --- MAIN CHAT ROUTE ---
+# --- MAIN ROUTE ---
 @app.route('/', methods=['POST'])
 def main():
     global session_dict
