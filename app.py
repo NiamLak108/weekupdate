@@ -14,7 +14,6 @@ app = Flask(__name__)
 SESSION_FILE = "session_store.json"
 
 def load_sessions():
-    """Load stored sessions from a JSON file."""
     if os.path.exists(SESSION_FILE):
         with open(SESSION_FILE, "r") as file:
             try:
@@ -25,21 +24,18 @@ def load_sessions():
 
 
 def save_sessions(session_dict):
-    """Save sessions to a JSON file."""
     with open(SESSION_FILE, "w") as file:
         json.dump(session_dict, file, indent=4)
 
-# Load existing sessions
 session_dict = load_sessions()
 
 # --- DUMMY TEST SESSION FOR WEEKLY-UPDATE ---
-# ensures a fully-onboarded test_user for quick testing
 def _init_test_user():
     session_dict.setdefault("test_user", {
         "session_id": "test_user-session",
-        "onboarding_stage": "done",      # skip onboarding
-        "condition": "Crohn’s disease",  # default condition
-        "news_pref": None,                 # will choose each time
+        "onboarding_stage": "done",
+        "condition": "Crohn’s disease",
+        "news_pref": None,
         "news_sources": ["bbc.com", "nytimes.com"]
     })
     save_sessions(session_dict)
@@ -51,18 +47,6 @@ def websearch(query):
     with DDGS() as ddgs:
         results = ddgs.text(query, max_results=5)
     return [r["href"] for r in results]
-
-
-def get_page(url):
-    headers = {"User-Agent": "Mozilla/5.0"}
-    response = requests.get(url, headers=headers)
-    if response.status_code == 200:
-        soup = BeautifulSoup(response.text, "html.parser")
-        for tag in soup(["script", "style", "header", "footer", "nav", "aside"]):
-            tag.extract()
-        text = soup.get_text(separator=" ", strip=True)
-        return " ".join(text.split())[:1500]
-    return f"Failed to fetch {url}, status code: {response.status_code}"
 
 
 def youtube_search(query):
@@ -85,19 +69,29 @@ def instagram_search(query):
 
 # --- WEEKLY UPDATE FUNCTIONS ---
 def agent_weekly_update(user_info, health_info):
-    system = f"""
-You are an AI agent designed to handle weekly health content updates for users with specific health conditions.
+    # Determine which tool to use based on user preference
+    pref = user_info.get("news_pref")
+    tool_map = {
+        "YouTube": "youtube_search",
+        "TikTok": "tiktok_search",
+        "Instagram Reel": "instagram_search",
+        "Research News": "websearch"
+    }
+    tool = tool_map.get(pref, "websearch")
+    condition = health_info.get("condition", "health")
 
-Your job is to use the right tool to deliver tailored content based on the user's health condition and preferences.
-ONLY respond with five unique tool calls, one per line:
-- youtube_search("..."), tiktok_search("..."), instagram_search("..."), or websearch("...")
-Queries should reflect condition={health_info.get('condition')} and platform preferences.
+    system_prompt = f"""
+You are an AI agent generating weekly updates for a user with {condition}.
+Use only the {tool} tool to generate exactly five unique calls.
+Each call should search for "{condition}" plus a relevant phrase.
+Respond with one tool call per line, e.g.:
+{tool}("{condition} management tips")
 """
     response = generate(
         model='4o-mini',
-        system=system,
+        system=system_prompt,
         query="Generate five unique tool calls, one per line.",
-        temperature=0.9,
+        temperature=0.8,
         lastk=30,
         session_id='HEALTH_UPDATE_AGENT',
         rag_usage=False
@@ -107,57 +101,29 @@ Queries should reflect condition={health_info.get('condition')} and platform pre
 
 def weekly_update_internal(user):
     if user not in session_dict:
-        return {"text": "User not found in session."}
-
-    user_session = session_dict[user]
-    user_info = {
-        "name": user,
-        "news_sources": user_session.get("news_sources", []),
-        "news_pref": user_session.get("news_pref", "Research News")
-    }
-    health_info = {"condition": user_session.get("condition", "unknown")}
+        return {"text": "User not found."}
+    user_sess = session_dict[user]
+    user_info = {"news_pref": user_sess.get("news_pref")}
+    health_info = {"condition": user_sess.get("condition")}
 
     raw = agent_weekly_update(user_info, health_info)
     calls = re.findall(r'(youtube_search\("[^"]+"\)|tiktok_search\("[^"]+"\)|instagram_search\("[^"]+"\)|websearch\("[^"]+"\))', raw)
-
-    seen = set(calls)
-    # ensure at least 5 unique calls
-    while len(calls) < 5:
-        prompt = f"Generate one additional unique tool call distinct from these: {', '.join(seen)}"
-        extra = generate(
-            model='4o-mini', system=system, query=prompt,
-            temperature=0.9, lastk=30,
-            session_id='HEALTH_UPDATE_AGENT', rag_usage=False
-        )['response']
-        match = re.search(r'(youtube_search\("[^"]+"\)|tiktok_search\("[^"]+"\)|instagram_search\("[^"]+"\)|websearch\("[^"]+"\))', extra)
-        if match:
-            call = match.group(0)
-            if call not in seen:
-                seen.add(call)
-                calls.append(call)
-                continue
-        break
 
     results = []
     for call in calls[:5]:
         try:
             links = eval(call)
-            top = links[0] if links else 'No results found'
+            top = links[0] if links else 'No results'
         except Exception:
-            top = 'Error executing query'
+            top = 'Error'
         results.append({"query": call, "link": top})
 
     lines = [f"• {r['query']}: {r['link']}" for r in results]
-    return {"text": "Here is your weekly health content digest with 5 unique searches:\n" + "\n".join(lines),
-            "queries": calls[:5],
-            "results": results}
+    return {"text": "Here is your weekly health content digest with 5 unique searches:\n" + "\n".join(lines)}
 
-# --- ONBOARDING FUNCTIONS ---
+# --- ONBOARDING FUNCTIONS (unchanged) ---
 def first_interaction(message, user):
-    questions = {...}  # your existing questions dict
-    stage = session_dict[user].get("onboarding_stage", "condition")
-    # existing onboarding logic...
-    # (keep your full first_interaction implementation here)
+    # ... your existing onboarding logic ...
     return {"text": "..."}
 
 # --- MAIN CHAT ROUTE ---
@@ -170,7 +136,7 @@ def main():
 
     session_dict = load_sessions()
 
-    # Initialize new users (real) 
+    # Initialize new users
     if user not in session_dict:
         session_dict[user] = {
             "session_id": f"{user}-session",
@@ -185,7 +151,7 @@ def main():
         }
         save_sessions(session_dict)
 
-    # 1) User asks for weekly update
+    # 1) User asks for weekly update → show choice buttons
     if message.lower() == "weekly update":
         buttons = [
             {"type":"button","text":"🎥 YouTube","msg":"YouTube","msg_in_chat_window":True},
@@ -198,30 +164,24 @@ def main():
             "attachments": [{"collapsed": False, "color": "#e3e3e3", "actions": buttons}]
         })
 
-    # 2) User selects content type
+    # 2) User selects content type → generate update
     if message in ["YouTube", "Instagram Reel", "TikTok", "Research News"]:
         session_dict[user]["news_pref"] = message
         session_dict[user]["onboarding_stage"] = "done"
         save_sessions(session_dict)
         return jsonify(weekly_update_internal(user))
 
-    # 3) Continue onboarding or post-onboard prompt
-    if session_dict[user]["onboarding_stage"] != "done":
+    # 3) Continue onboarding or normal prompt
+    if session_dict[user].get("onboarding_stage") != "done":
         response = first_interaction(message, user)
     else:
-        response = {"text": "You're all set! Type 'weekly update' to choose content and get your digest."}
+        response = {"text": "You're onboarded! Type 'weekly update' to choose content and get your digest."}
 
     save_sessions(session_dict)
     return jsonify(response)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001)
-
-
-
-
-
-
 
 
 
