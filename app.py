@@ -62,24 +62,37 @@ def tiktok_search(query):
 
 
 def instagram_search(query):
-    tag = query.replace(" ", "")
+    """
+    Search Instagram for posts related to the query using DuckDuckGo.
+    Returns up to 5 Instagram URLs (posts, reels, profiles).
+    """
     with DDGS() as ddgs:
-        results = ddgs.text(f"#{tag} site:instagram.com", max_results=5)
-    return [r.get("href") for r in results if "instagram.com" in r.get("href", "")]
+        # Use a site filter to target Instagram domains
+        results = ddgs.text(f"{query} site:instagram.com", max_results=10)
+    links = []
+    for r in results:
+        url = r.get("href", "")
+        # Include only valid Instagram content URLs
+        if url and "instagram.com" in url:
+            links.append(url)
+        if len(links) >= 5:
+            break
+    return links
 
 # --- WEEKLY UPDATE GENERATION ---
+# Map user-visible channel to (function_name, function)
 TOOL_MAP = {
-    "YouTube": youtube_search,
-    "TikTok": tiktok_search,
-    "Instagram Reel": instagram_search,
-    "Research News": websearch
+    "YouTube": ("youtube_search", youtube_search),
+    "TikTok": ("tiktok_search", tiktok_search),
+    "Instagram Reel": ("instagram_search", instagram_search),
+    "Research News": ("websearch", websearch)
 }
 
-def agent_weekly_update(tool_name, condition):
+def agent_weekly_update(func_name, condition):
     # Generate five unique calls for the specified tool and condition
     prompt = (
-        f"Generate exactly five unique calls using only {tool_name}."
-        f" Each call should look like: {tool_name}(\"{condition} ...\")."
+        f"Generate exactly five unique calls using only {func_name}."
+        f" Each call should look like: {func_name}(\"{condition} ...\")."
         f" The search phrase must include '{condition}'. Return one call per line."
     )
     resp = generate(
@@ -101,14 +114,13 @@ def weekly_update_internal(user):
 
     pref = sess.get("news_pref")
     condition = sess.get("condition")
-    # Determine the function based on user preference
-    func = TOOL_MAP.get(pref, websearch)
-    tool_name = next((k for k, v in TOOL_MAP.items() if v == func), "websearch")
+    # Determine the function and its name based on user preference
+    func_name, func = TOOL_MAP.get(pref, ("websearch", websearch))
 
     # Step 1: generate raw calls
-    raw = agent_weekly_update(tool_name, condition)
-    # Filter lines for the chosen tool
-    lines = [line.strip() for line in raw.splitlines() if line.strip().startswith(f"{tool_name}(")]
+    raw = agent_weekly_update(func_name, condition)
+    # Filter lines for the chosen function name
+    lines = [line.strip() for line in raw.splitlines() if line.strip().startswith(f"{func_name}(")]
     # Deduplicate while preserving order
     seen = []
     for l in lines:
@@ -119,7 +131,7 @@ def weekly_update_internal(user):
     # Step 2: execute and collect top links
     results = []
     for call in calls:
-        m = re.match(rf"{tool_name}\(\"(.+)\"\)", call)
+        m = re.match(rf"{func_name}\(\"(.+)\"\)", call)
         if m:
             query_str = m.group(1)
             try:
@@ -131,9 +143,9 @@ def weekly_update_internal(user):
             top = "Invalid call"
         results.append({"query": call, "link": top})
 
-    # Ensure exactly 5 entries
+    # Ensure exactly 5 entries (pad if necessary)
     while len(results) < 5:
-        results.append({"query": f"{tool_name}(\"{condition}\")", "link": "No call generated"})
+        results.append({"query": f"{func_name}(\"{condition}\")", "link": "No call generated"})
 
     # Format the response
     text_lines = [f"• {r['query']}: {r['link']}" for r in results]
@@ -185,7 +197,7 @@ def main():
         })
 
     # 2) User selects a channel and fetches updates
-    if message in TOOL_MAP.keys():
+    if message in TOOL_MAP:
         session_dict[user]["news_pref"] = message
         session_dict[user]["onboarding_stage"] = "done"
         save_sessions(session_dict)
