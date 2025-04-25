@@ -29,7 +29,6 @@ def save_sessions(sessions):
 session_dict = load_sessions()
 
 # --- DUMMY TEST USER (skip onboarding) ---
-
 def _init_test_user():
     session_dict.setdefault("test_user", {
         "session_id": "test_user-session",
@@ -43,27 +42,46 @@ def _init_test_user():
 _init_test_user()
 
 # --- TOOL FUNCTIONS ---
+# Normalize extraction from DuckDuckGo results using 'href' or 'link'
 def websearch(query):
     with DDGS() as ddgs:
-        results = ddgs.text(query, max_results=5)
-    return [r.get("href") for r in results]
+        results = ddgs.text(query, max_results=10)
+    links = []
+    for r in results:
+        url = r.get("href") or r.get("link")
+        if url:
+            links.append(url)
+    return links[:5]
+
 
 def youtube_search(query):
     with DDGS() as ddgs:
-        results = ddgs.text(f"{query} site:youtube.com", max_results=5)
-    return [r.get("href") for r in results if "youtube.com/watch" in r.get("href", "")]
+        results = ddgs.text(f"{query} site:youtube.com", max_results=10)
+    links = []
+    for r in results:
+        url = r.get("href") or r.get("link")
+        if url and "youtube.com/watch" in url:
+            links.append(url)
+    return links[:5]
+
 
 def tiktok_search(query):
     with DDGS() as ddgs:
-        results = ddgs.text(f"{query} site:tiktok.com", max_results=5)
-    return [r.get("href") for r in results if "tiktok.com" in r.get("href", "")]
+        results = ddgs.text(f"{query} site:tiktok.com", max_results=10)
+    links = []
+    for r in results:
+        url = r.get("href") or r.get("link")
+        if url and "tiktok.com" in url:
+            links.append(url)
+    return links[:5]
+
 
 def instagram_search(query):
     with DDGS() as ddgs:
-        results = ddgs.text(f"{query} site:instagram.com", max_results=10)
+        results = ddgs.text(f"{query} site:instagram.com", max_results=15)
     links = []
     for r in results:
-        url = r.get("href", "")
+        url = r.get("href") or r.get("link")
         if url and "instagram.com" in url:
             links.append(url)
         if len(links) >= 5:
@@ -81,9 +99,8 @@ TOOL_MAP = {
 
 def agent_weekly_update(func_name, condition):
     prompt = (
-        f"Generate exactly three unique calls using only {func_name}."
-        f" Each call should look like: {func_name}(\"{condition} ...\")."
-        f" The search phrase must include '{condition}'. Return one call per line."
+        f"Generate exactly three unique search phrases including '{condition}' using only {func_name}."
+        f" Return one phrase per line without function syntax."
     )
     resp = generate(
         model="4o-mini",
@@ -106,37 +123,31 @@ def weekly_update_internal(user):
 
     func_name, func = TOOL_MAP.get(pref, ("websearch", websearch))
 
-    # Step 1: generate raw calls
+    # Step 1: generate raw phrases
     raw = agent_weekly_update(func_name, condition)
-    lines = [line.strip() for line in raw.splitlines() if line.strip().startswith(f"{func_name}(")]
+    lines = [line.strip().strip('"') for line in raw.splitlines() if line.strip()]
     seen = []
-    for l in lines:
-        if l not in seen:
-            seen.append(l)
-    calls = seen[:3]
+    for phrase in lines:
+        if phrase and phrase not in seen:
+            seen.append(phrase)
+    queries = seen[:3]
 
     # Step 2: execute and collect top links
     results = []
-    for call in calls:
-        m = re.match(rf"{func_name}\(\"(.+)\"\)", call)
-        if m:
-            query_str = m.group(1)
-            try:
-                links = func(query_str)
-                top = links[0] if links else "No results found"
-            except Exception:
-                top = "Error fetching results"
-        else:
-            query_str = condition
-            top = "Invalid call"
-        results.append({"query": query_str, "link": top})
+    for q in queries:
+        try:
+            links = func(q)
+            top = links[0] if links else "No results found"
+        except Exception as e:
+            top = f"Error: {e}"
+        results.append({"query": q, "link": top})
 
-    # Ensure exactly three entries (pad if necessary)
+    # Ensure exactly three entries
     while len(results) < 3:
         results.append({"query": condition, "link": "No call generated"})
 
-    # Format the response without function names
-    text_lines = [f"• {item['query']}: {item['link']}" for item in results]
+    # Format the response
+    text_lines = [f"• {r['query']}: {r['link']}" for r in results]
     return {
         "text": "Here is your weekly health content digest with 3 unique searches:\n" + "\n".join(text_lines),
         "results": results
