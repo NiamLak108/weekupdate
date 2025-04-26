@@ -44,7 +44,7 @@ _init_test_user()
 
 # --- TOOL FUNCTIONS ---
 def websearch(query):
-    with DDGS() as ddgs:
+    with DDGS(use_lite=False) as ddgs:
         results = ddgs.text(query, max_results=10)
     links = []
     for r in results:
@@ -55,7 +55,7 @@ def websearch(query):
 
 
 def youtube_search(query):
-    with DDGS() as ddgs:
+    with DDGS(use_lite=False) as ddgs:
         results = ddgs.text(f"{query} site:youtube.com", max_results=10)
     links = []
     for r in results:
@@ -66,7 +66,7 @@ def youtube_search(query):
 
 
 def tiktok_search(query):
-    with DDGS() as ddgs:
+    with DDGS(use_lite=False) as ddgs:
         results = ddgs.text(f"{query} site:tiktok.com", max_results=10)
     links = []
     for r in results:
@@ -77,7 +77,7 @@ def tiktok_search(query):
 
 
 def instagram_search(query):
-    with DDGS() as ddgs:
+    with DDGS(use_lite=False) as ddgs:
         results = ddgs.text(f"{query} site:instagram.com", max_results=15)
     links = []
     for r in results:
@@ -232,7 +232,6 @@ def main():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001)
-
 
 
 
