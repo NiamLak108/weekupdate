@@ -26,10 +26,10 @@ def save_sessions(sessions):
     with open(SESSION_FILE, "w") as f:
         json.dump(sessions, f, indent=4)
 
-# Load or initialize the sessions dict
+# Load sessions
 session_dict = load_sessions()
 
-# --- DUMMY TEST USER (skip onboarding) ---
+# --- DUMMY TEST USER ---
 def _init_test_user():
     session_dict.setdefault("test_user", {
         "session_id": "test_user-session",
@@ -42,59 +42,27 @@ def _init_test_user():
 
 _init_test_user()
 
-# --- TOOL FUNCTIONS ---
+# --- TOOL FUNCTIONS (HTML search to avoid rate limits) ---
 def websearch(query):
-    try:
-        with DDGS() as ddgs:
-            results = ddgs.text(query, max_results=10)
-    except Exception:
-        return []
-    links = []
-    for r in results:
-        url = r.get("href") or r.get("link")
-        if not url or "duckduckgo.com" in url:
-            continue
-        links.append(url)
-        if len(links) >= 5:
-            break
-    return links
     with DDGS() as ddgs:
-        results = ddgs.text(query, max_results=10)
+        results = ddgs.html(query, max_results=10)
     links = []
     for r in results:
         url = r.get("href") or r.get("link")
-        # skip DuckDuckGo internal: lite or html rate-limit pages
         if not url or "duckduckgo.com" in url:
             continue
         links.append(url)
         if len(links) >= 5:
             break
     return links
-
 
 
 def youtube_search(query):
-    try:
-        with DDGS() as ddgs:
-            results = ddgs.text(f"{query} site:youtube.com", max_results=10)
-    except Exception:
-        return []
-    links = []
-    for r in results:
-        url = r.get("href") or r.get("link")
-        if not url or "duckduckgo.com" in url:
-            continue
-        if "youtube.com/watch" in url:
-            links.append(url)
-        if len(links) >= 5:
-            break
-    return links
     with DDGS() as ddgs:
-        results = ddgs.text(f"{query} site:youtube.com", max_results=10)
+        results = ddgs.html(f"{query} site:youtube.com", max_results=10)
     links = []
     for r in results:
         url = r.get("href") or r.get("link")
-        # skip DuckDuckGo internal pages
         if not url or "duckduckgo.com" in url:
             continue
         if "youtube.com/watch" in url:
@@ -102,31 +70,14 @@ def youtube_search(query):
         if len(links) >= 5:
             break
     return links
-
 
 
 def tiktok_search(query):
-    try:
-        with DDGS() as ddgs:
-            results = ddgs.text(f"{query} site:tiktok.com", max_results=10)
-    except Exception:
-        return []
-    links = []
-    for r in results:
-        url = r.get("href") or r.get("link")
-        if not url or "duckduckgo.com" in url:
-            continue
-        if "tiktok.com" in url:
-            links.append(url)
-        if len(links) >= 5:
-            break
-    return links
     with DDGS() as ddgs:
-        results = ddgs.text(f"{query} site:tiktok.com", max_results=10)
+        results = ddgs.html(f"{query} site:tiktok.com", max_results=10)
     links = []
     for r in results:
         url = r.get("href") or r.get("link")
-        # skip DuckDuckGo internal pages
         if not url or "duckduckgo.com" in url:
             continue
         if "tiktok.com" in url:
@@ -134,31 +85,14 @@ def tiktok_search(query):
         if len(links) >= 5:
             break
     return links
-
 
 
 def instagram_search(query):
-    try:
-        with DDGS() as ddgs:
-            results = ddgs.text(f"{query} site:instagram.com", max_results=15)
-    except Exception:
-        return []
-    links = []
-    for r in results:
-        url = r.get("href") or r.get("link")
-        if not url or "duckduckgo.com" in url:
-            continue
-        if "instagram.com" in url:
-            links.append(url)
-        if len(links) >= 5:
-            break
-    return links
     with DDGS() as ddgs:
-        results = ddgs.text(f"{query} site:instagram.com", max_results=15)
+        results = ddgs.html(f"{query} site:instagram.com", max_results=15)
     links = []
     for r in results:
         url = r.get("href") or r.get("link")
-        # skip DuckDuckGo internal pages
         if not url or "duckduckgo.com" in url:
             continue
         if "instagram.com" in url:
@@ -166,10 +100,8 @@ def instagram_search(query):
         if len(links) >= 5:
             break
     return links
-
 
 # --- WEEKLY UPDATE GENERATION ---
-# Map user-visible channel to (function_name, function)
 TOOL_MAP = {
     "YouTube": ("youtube_search", youtube_search),
     "TikTok": ("tiktok_search", tiktok_search),
@@ -199,37 +131,28 @@ def weekly_update_internal(user):
     if not sess:
         return {"text": "User not found."}
 
-    # Determine preference and condition (fallback to test_user)
+    # Determine preference and condition
     pref = sess.get("news_pref")
     condition = sess.get("condition") or session_dict.get("test_user", {}).get("condition", "")
-
     func_name, func = TOOL_MAP.get(pref, ("websearch", websearch))
 
-    # Step 1: generate raw search phrases
+    # Generate raw phrases
     raw = agent_weekly_update(func_name, condition)
 
-    # Step 2: extract bare phrases
+    # Extract bare phrases
     queries = []
     for line in raw.splitlines():
-        line = line.strip()
-        # Attempt to match func_name("phrase")
-        m = re.match(rf"{func_name}\(\"(.+)\"\)", line)
-        if m:
-            queries.append(m.group(1))
-        else:
-            # Strip surrounding quotes if present
-            phrase = line.strip('"')
-            if phrase:
-                queries.append(phrase)
-
-    # Deduplicate and limit to three
+        phrase = line.strip().strip('"')
+        if phrase:
+            queries.append(phrase)
+    # Dedupe & limit
     seen = []
     for q in queries:
         if q not in seen:
             seen.append(q)
     queries = seen[:3]
 
-    # Step 3: execute queries and collect top links
+    # Execute and collect top links
     results = []
     for q in queries:
         try:
@@ -239,20 +162,17 @@ def weekly_update_internal(user):
             top = f"Error fetching results: {e}"
         results.append({"query": q, "link": top})
 
-    # Pad to three entries if necessary
+    # Pad to three
     while len(results) < 3:
         results.append({"query": condition, "link": "No call generated"})
 
-    # Step 4: format output
-    text_lines = [f"• {item['query']}: {item['link']}" for item in results]
-    return {
-        "text": "Here is your weekly health content digest with 3 unique searches:\n" + "\n".join(text_lines),
-        "results": results
-    }
+    # Format output
+    lines = [f"• {r['query']}: {r['link']}" for r in results]
+    return {"text": "Here is your weekly health content digest with 3 unique searches:\n" + "\n".join(lines),
+            "results": results}
 
-# --- ONBOARDING FUNCTIONS ---
+# --- ONBOARDING (unchanged) ---
 def first_interaction(message, user):
-    # Existing onboarding logic
     return {"text": "..."}
 
 # --- MAIN ROUTE ---
@@ -263,10 +183,7 @@ def main():
     message = data.get("text", "").strip()
     user = data.get("user_name", "Unknown")
 
-    # Reload sessions
     session_dict = load_sessions()
-
-    # Initialize new users if necessary
     if user not in session_dict:
         session_dict[user] = {
             "session_id": f"{user}-session",
@@ -281,7 +198,6 @@ def main():
         }
         save_sessions(session_dict)
 
-    # 1) If user requests a weekly update, show content-type buttons
     if message.lower() == "weekly update":
         buttons = [
             {"type": "button", "text": "🎥 YouTube", "msg": "YouTube", "msg_in_chat_window": True},
@@ -294,14 +210,12 @@ def main():
             "attachments": [{"collapsed": False, "color": "#e3e3e3", "actions": buttons}]
         })
 
-    # 2) If user selects a channel, save preference and run update
     if message in TOOL_MAP:
         session_dict[user]["news_pref"] = message
         session_dict[user]["onboarding_stage"] = "done"
         save_sessions(session_dict)
         return jsonify(weekly_update_internal(user))
 
-    # 3) Otherwise, continue onboarding or provide default prompt
     if session_dict[user].get("onboarding_stage") != "done":
         response = first_interaction(message, user)
     else:
