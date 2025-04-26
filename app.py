@@ -44,6 +44,20 @@ _init_test_user()
 
 # --- TOOL FUNCTIONS ---
 def websearch(query):
+    try:
+        with DDGS() as ddgs:
+            results = ddgs.text(query, max_results=10)
+    except Exception:
+        return []
+    links = []
+    for r in results:
+        url = r.get("href") or r.get("link")
+        if not url or "duckduckgo.com" in url:
+            continue
+        links.append(url)
+        if len(links) >= 5:
+            break
+    return links
     with DDGS() as ddgs:
         results = ddgs.text(query, max_results=10)
     links = []
@@ -60,6 +74,21 @@ def websearch(query):
 
 
 def youtube_search(query):
+    try:
+        with DDGS() as ddgs:
+            results = ddgs.text(f"{query} site:youtube.com", max_results=10)
+    except Exception:
+        return []
+    links = []
+    for r in results:
+        url = r.get("href") or r.get("link")
+        if not url or "duckduckgo.com" in url:
+            continue
+        if "youtube.com/watch" in url:
+            links.append(url)
+        if len(links) >= 5:
+            break
+    return links
     with DDGS() as ddgs:
         results = ddgs.text(f"{query} site:youtube.com", max_results=10)
     links = []
@@ -77,6 +106,21 @@ def youtube_search(query):
 
 
 def tiktok_search(query):
+    try:
+        with DDGS() as ddgs:
+            results = ddgs.text(f"{query} site:tiktok.com", max_results=10)
+    except Exception:
+        return []
+    links = []
+    for r in results:
+        url = r.get("href") or r.get("link")
+        if not url or "duckduckgo.com" in url:
+            continue
+        if "tiktok.com" in url:
+            links.append(url)
+        if len(links) >= 5:
+            break
+    return links
     with DDGS() as ddgs:
         results = ddgs.text(f"{query} site:tiktok.com", max_results=10)
     links = []
@@ -94,6 +138,21 @@ def tiktok_search(query):
 
 
 def instagram_search(query):
+    try:
+        with DDGS() as ddgs:
+            results = ddgs.text(f"{query} site:instagram.com", max_results=15)
+    except Exception:
+        return []
+    links = []
+    for r in results:
+        url = r.get("href") or r.get("link")
+        if not url or "duckduckgo.com" in url:
+            continue
+        if "instagram.com" in url:
+            links.append(url)
+        if len(links) >= 5:
+            break
+    return links
     with DDGS() as ddgs:
         results = ddgs.text(f"{query} site:instagram.com", max_results=15)
     links = []
