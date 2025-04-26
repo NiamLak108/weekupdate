@@ -44,49 +44,70 @@ _init_test_user()
 
 # --- TOOL FUNCTIONS ---
 def websearch(query):
-    with DDGS(use_lite=False) as ddgs:
+    with DDGS() as ddgs:
         results = ddgs.text(query, max_results=10)
     links = []
     for r in results:
         url = r.get("href") or r.get("link")
-        if url:
-            links.append(url)
-    return links[:5]
+        # skip DuckDuckGo internal: lite or html rate-limit pages
+        if not url or "duckduckgo.com" in url:
+            continue
+        links.append(url)
+        if len(links) >= 5:
+            break
+    return links
+
 
 
 def youtube_search(query):
-    with DDGS(use_lite=False) as ddgs:
+    with DDGS() as ddgs:
         results = ddgs.text(f"{query} site:youtube.com", max_results=10)
     links = []
     for r in results:
         url = r.get("href") or r.get("link")
-        if url and "youtube.com/watch" in url:
-            links.append(url)
-    return links[:5]
-
-
-def tiktok_search(query):
-    with DDGS(use_lite=False) as ddgs:
-        results = ddgs.text(f"{query} site:tiktok.com", max_results=10)
-    links = []
-    for r in results:
-        url = r.get("href") or r.get("link")
-        if url and "tiktok.com" in url:
-            links.append(url)
-    return links[:5]
-
-
-def instagram_search(query):
-    with DDGS(use_lite=False) as ddgs:
-        results = ddgs.text(f"{query} site:instagram.com", max_results=15)
-    links = []
-    for r in results:
-        url = r.get("href") or r.get("link")
-        if url and "instagram.com" in url:
+        # skip DuckDuckGo internal pages
+        if not url or "duckduckgo.com" in url:
+            continue
+        if "youtube.com/watch" in url:
             links.append(url)
         if len(links) >= 5:
             break
     return links
+
+
+
+def tiktok_search(query):
+    with DDGS() as ddgs:
+        results = ddgs.text(f"{query} site:tiktok.com", max_results=10)
+    links = []
+    for r in results:
+        url = r.get("href") or r.get("link")
+        # skip DuckDuckGo internal pages
+        if not url or "duckduckgo.com" in url:
+            continue
+        if "tiktok.com" in url:
+            links.append(url)
+        if len(links) >= 5:
+            break
+    return links
+
+
+
+def instagram_search(query):
+    with DDGS() as ddgs:
+        results = ddgs.text(f"{query} site:instagram.com", max_results=15)
+    links = []
+    for r in results:
+        url = r.get("href") or r.get("link")
+        # skip DuckDuckGo internal pages
+        if not url or "duckduckgo.com" in url:
+            continue
+        if "instagram.com" in url:
+            links.append(url)
+        if len(links) >= 5:
+            break
+    return links
+
 
 # --- WEEKLY UPDATE GENERATION ---
 # Map user-visible channel to (function_name, function)
@@ -232,6 +253,7 @@ def main():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001)
+
 
 
 
