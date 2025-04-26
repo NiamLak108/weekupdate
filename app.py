@@ -5,7 +5,6 @@ import requests
 from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 from llmproxy import generate
-from duckduckgo_search import DDGS
 
 app = Flask(__name__)
 
@@ -26,7 +25,7 @@ def save_sessions(sessions):
     with open(SESSION_FILE, "w") as f:
         json.dump(sessions, f, indent=4)
 
-# Load or initialize the sessions dict
+# Load or initialize sessions
 session_dict = load_sessions()
 
 # --- DUMMY TEST USER (skip onboarding) ---
@@ -42,91 +41,48 @@ def _init_test_user():
 
 _init_test_user()
 
-# --- TOOL FUNCTIONS ---
-def websearch(query):
+# --- HELPER: Scrape DuckDuckGo HTML results ---
+def ddg_search_urls(query, max_results=5):
     """
-    Perform a DuckDuckGo text search and return up to 5 external URLs.
+    Perform a DuckDuckGo HTML search and return up to max_results external URLs.
     """
+    url = "https://duckduckgo.com/html/"
+    headers = {"User-Agent": "Mozilla/5.0"}
+    data = {"q": query}
     try:
-        with DDGS() as ddgs:
-            results = ddgs.text(query, max_results=20)
+        res = requests.post(url, data=data, headers=headers, timeout=10)
+        res.raise_for_status()
     except Exception:
         return []
+    soup = BeautifulSoup(res.text, "html.parser")
     links = []
-    for r in results:
-        url = r.get("href") or r.get("link")
-        if not url or "duckduckgo.com" in url:
+    for a in soup.select("a.result__a[href]"):
+        href = a["href"]
+        # Skip internal redirects
+        if "duckduckgo.com" in href:
             continue
-        links.append(url)
-        if len(links) >= 5:
+        links.append(href)
+        if len(links) >= max_results:
             break
     return links
+
+# --- TOOL FUNCTIONS ---
+def websearch(query):
+    return ddg_search_urls(query, max_results=5)
 
 
 def youtube_search(query):
-    """
-    Search YouTube via DuckDuckGo and return up to 5 video URLs.
-    """
-    try:
-        with DDGS() as ddgs:
-            results = ddgs.text(query, max_results=20)
-    except Exception:
-        return []
-    links = []
-    for r in results:
-        url = r.get("href") or r.get("link")
-        if not url or "duckduckgo.com" in url:
-            continue
-        if "youtube.com" in url:
-            links.append(url)
-        if len(links) >= 5:
-            break
-    return links
+    return ddg_search_urls(f"{query} site:youtube.com", max_results=5)
 
 
 def tiktok_search(query):
-    """
-    Search TikTok via DuckDuckGo and return up to 5 URLs.
-    """
-    try:
-        with DDGS() as ddgs:
-            results = ddgs.text(query, max_results=20)
-    except Exception:
-        return []
-    links = []
-    for r in results:
-        url = r.get("href") or r.get("link")
-        if not url or "duckduckgo.com" in url:
-            continue
-        if "tiktok.com" in url:
-            links.append(url)
-        if len(links) >= 5:
-            break
-    return links
+    return ddg_search_urls(f"{query} site:tiktok.com", max_results=5)
 
 
 def instagram_search(query):
-    """
-    Search Instagram via DuckDuckGo and return up to 5 URLs.
-    """
-    try:
-        with DDGS() as ddgs:
-            results = ddgs.text(query, max_results=20)
-    except Exception:
-        return []
-    links = []
-    for r in results:
-        url = r.get("href") or r.get("link")
-        if not url or "duckduckgo.com" in url:
-            continue
-        if "instagram.com" in url:
-            links.append(url)
-        if len(links) >= 5:
-            break
-    return links
+    return ddg_search_urls(f"{query} site:instagram.com", max_results=5)
 
 # --- WEEKLY UPDATE GENERATION ---
-# Map user-visible channel to (function_name, function)
 TOOL_MAP = {
     "YouTube": ("youtube_search", youtube_search),
     "TikTok": ("tiktok_search", tiktok_search),
@@ -135,10 +91,6 @@ TOOL_MAP = {
 }
 
 def agent_weekly_update(func_name, condition):
-    """
-    Prompt the LLM to generate exactly three unique search phrases including the condition,
-    without any function syntax.
-    """
     prompt = (
         f"Generate exactly three unique search phrases including '{condition}' using only {func_name}."
         f" Return one phrase per line, no code syntax."
@@ -160,15 +112,12 @@ def weekly_update_internal(user):
     if not sess:
         return {"text": "User not found."}
 
-    # Determine preference and condition (fallback to test_user)
     pref = sess.get("news_pref")
     condition = sess.get("condition") or session_dict.get("test_user", {}).get("condition", "")
     func_name, func = TOOL_MAP.get(pref, ("websearch", websearch))
 
-    # Step 1: generate raw search phrases
+    # Generate raw search phrases
     raw = agent_weekly_update(func_name, condition)
-
-    # Step 2: extract bare phrases
     queries = [line.strip().strip('"') for line in raw.splitlines() if line.strip()]
     seen = []
     for q in queries:
@@ -176,30 +125,23 @@ def weekly_update_internal(user):
             seen.append(q)
     queries = seen[:3]
 
-    # Step 3: execute queries and collect top links
+    # Execute queries
     results = []
     for q in queries:
-        try:
-            links = func(q)
-            top = links[0] if links else "No results found"
-        except Exception as e:
-            top = f"Error fetching results: {e}"
+        links = func(q)
+        top = links[0] if links else "No results found"
         results.append({"query": q, "link": top})
 
-    # Pad to three entries if necessary
+    # Pad if fewer than 3
     while len(results) < 3:
         results.append({"query": condition, "link": "No call generated"})
 
-    # Format output
-    text_lines = [f"• {item['query']}: {item['link']}" for item in results]
-    return {
-        "text": "Here is your weekly health content digest with 3 unique searches:\n" + "\n".join(text_lines),
-        "results": results
-    }
+    lines = [f"• {r['query']}: {r['link']}" for r in results]
+    return {"text": "Here is your weekly health content digest with 3 unique searches:\n" + "\n".join(lines),
+            "results": results}
 
 # --- ONBOARDING FUNCTIONS ---
 def first_interaction(message, user):
-    # Existing onboarding logic
     return {"text": "..."}
 
 # --- MAIN ROUTE ---
@@ -210,10 +152,7 @@ def main():
     message = data.get("text", "").strip()
     user = data.get("user_name", "Unknown")
 
-    # Reload sessions
     session_dict = load_sessions()
-
-    # Initialize new users if necessary
     if user not in session_dict:
         session_dict[user] = {
             "session_id": f"{user}-session",
@@ -228,7 +167,6 @@ def main():
         }
         save_sessions(session_dict)
 
-    # 1) If user requests a weekly update, show content-type buttons
     if message.lower() == "weekly update":
         buttons = [
             {"type": "button", "text": "🎥 YouTube", "msg": "YouTube", "msg_in_chat_window": True},
@@ -236,19 +174,15 @@ def main():
             {"type": "button", "text": "🎵 TikTok", "msg": "TikTok", "msg_in_chat_window": True},
             {"type": "button", "text": "🧪 Research News", "msg": "Research News", "msg_in_chat_window": True}
         ]
-        return jsonify({
-            "text": "Choose your weekly-update content type:",
-            "attachments": [{"collapsed": False, "color": "#e3e3e3", "actions": buttons}]
-        })
+        return jsonify({"text": "Choose your weekly-update content type:",
+                        "attachments": [{"collapsed": False, "color": "#e3e3e3", "actions": buttons}]})
 
-    # 2) If user selects a channel, save preference and run update
     if message in TOOL_MAP:
         session_dict[user]["news_pref"] = message
         session_dict[user]["onboarding_stage"] = "done"
         save_sessions(session_dict)
         return jsonify(weekly_update_internal(user))
 
-    # 3) Otherwise, continue onboarding or provide default prompt
     if session_dict[user].get("onboarding_stage") != "done":
         response = first_interaction(message, user)
     else:
