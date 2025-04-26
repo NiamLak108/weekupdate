@@ -42,13 +42,19 @@ def _init_test_user():
 
 _init_test_user()
 
-# --- TOOL FUNCTIONS (HTML search to avoid rate limits) ---
+# --- TOOL FUNCTIONS ---
 def websearch(query):
-    with DDGS() as ddgs:
-        results = ddgs.html(query, max_results=10)
+    """
+    Perform a DuckDuckGo text search and return up to 5 external URLs.
+    """
+    try:
+        with DDGS() as ddgs:
+            results = ddgs.text(query, max_results=10)
+    except Exception:
+        return []
     links = []
     for r in results:
-        url = r.get("href") or r.get("link")
+        url = r.get("href")
         if not url or "duckduckgo.com" in url:
             continue
         links.append(url)
@@ -58,11 +64,17 @@ def websearch(query):
 
 
 def youtube_search(query):
-    with DDGS() as ddgs:
-        results = ddgs.html(f"{query} site:youtube.com", max_results=10)
+    """
+    Search YouTube via DuckDuckGo and return up to 5 video URLs.
+    """
+    try:
+        with DDGS() as ddgs:
+            results = ddgs.text(f"{query} site:youtube.com", max_results=10)
+    except Exception:
+        return []
     links = []
     for r in results:
-        url = r.get("href") or r.get("link")
+        url = r.get("href")
         if not url or "duckduckgo.com" in url:
             continue
         if "youtube.com/watch" in url:
@@ -73,14 +85,22 @@ def youtube_search(query):
 
 
 def tiktok_search(query):
-    with DDGS() as ddgs:
-        results = ddgs.html(f"{query} site:tiktok.com", max_results=10)
+    """
+    Search TikTok via DuckDuckGo and return up to 5 URLs.
+    """
+    try:
+        with DDGS() as ddgs:
+            results = ddgs.text(f"{query} site:tiktok.com", max_results=10)
+    except Exception:
+        return []
     links = []
     for r in results:
-        url = r.get("href") or r.get("link")
+        url = r.get("href")
         if not url or "duckduckgo.com" in url:
             continue
-        if "tiktok.com" in url:
+        if "tiktok.com" in url and "watch" in url:
+            links.append(url)
+        elif "tiktok.com" in url:
             links.append(url)
         if len(links) >= 5:
             break
@@ -88,11 +108,17 @@ def tiktok_search(query):
 
 
 def instagram_search(query):
-    with DDGS() as ddgs:
-        results = ddgs.html(f"{query} site:instagram.com", max_results=15)
+    """
+    Search Instagram via DuckDuckGo and return up to 5 URLs.
+    """
+    try:
+        with DDGS() as ddgs:
+            results = ddgs.text(f"{query} site:instagram.com", max_results=15)
+    except Exception:
+        return []
     links = []
     for r in results:
-        url = r.get("href") or r.get("link")
+        url = r.get("href")
         if not url or "duckduckgo.com" in url:
             continue
         if "instagram.com" in url:
