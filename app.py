@@ -1,9 +1,8 @@
 import os
-import time
 import json
 from flask import Flask, request, jsonify
 from llmproxy import generate
-from duckduckgo_search import DDGS
+from duckduckgo_search import ddg
 
 app = Flask(__name__)
 
@@ -37,33 +36,19 @@ def _init_test_user():
 
 _init_test_user()
 
-# --- PERSISTENT DDGS SESSION & RATE-LIMIT HELPERS ---
-ddgs = DDGS()
-
-def ddgs_search(query, max_results=20, retries=3):
-    """
-    Wrapper around ddgs.text that retries with exponential backoff on rate-limit.
-    """
-    for attempt in range(retries):
-        try:
-            return ddgs.text(query, max_results=max_results)
-        except Exception as e:
-            if "Ratelimit" in str(e):
-                time.sleep(2 ** attempt)
-                continue
-            else:
-                raise
-    return []
-
 # --- TOOL FUNCTIONS ---
+
 def websearch(query):
     """
-    Perform a DuckDuckGo text search and return up to 5 external URLs.
+    DuckDuckGo web search, return up to 5 external URLs.
     """
-    results = ddgs_search(query, max_results=20)
+    try:
+        results = ddg(query, max_results=20)
+    except Exception:
+        return []
     links = []
-    for r in results:
-        url = r.get("href") or r.get("url")
+    for r in results or []:
+        url = r.get("href")
         if not url or "duckduckgo.com" in url:
             continue
         links.append(url)
@@ -73,13 +58,16 @@ def websearch(query):
 
 def youtube_search(query):
     """
-    Only fetch actual YouTube video URLs matching the query.
+    Search YouTube (only video pages) via DuckDuckGo.
     """
-    ddg_query = f'site:youtube.com/watch "{query}"'
-    results = ddgs_search(ddg_query, max_results=30)
+    ddg_query = f'site:youtube.com/watch {query}'
+    try:
+        results = ddg(ddg_query, max_results=30)
+    except Exception:
+        return []
     links = []
-    for r in results:
-        url = r.get("href") or r.get("url")
+    for r in results or []:
+        url = r.get("href")
         if url and ("youtube.com/watch" in url or "youtu.be/" in url):
             links.append(url)
         if len(links) >= 5:
@@ -88,14 +76,17 @@ def youtube_search(query):
 
 def tiktok_search(query):
     """
-    Only fetch TikTok video URLs matching the query.
+    Search TikTok (only video pages) via DuckDuckGo.
     """
-    ddg_query = f'site:tiktok.com/video "{query}"'
-    results = ddgs_search(ddg_query, max_results=30)
+    ddg_query = f'site:tiktok.com/video {query}'
+    try:
+        results = ddg(ddg_query, max_results=30)
+    except Exception:
+        return []
     links = []
-    for r in results:
-        url = r.get("href") or r.get("url")
-        if url and "/video/" in url and "tiktok.com" in url:
+    for r in results or []:
+        url = r.get("href")
+        if url and "tiktok.com" in url and "/video/" in url:
             links.append(url)
         if len(links) >= 5:
             break
@@ -103,13 +94,16 @@ def tiktok_search(query):
 
 def instagram_search(query):
     """
-    Only fetch Instagram Reel or post URLs matching the query.
+    Search Instagram Reels/posts via DuckDuckGo.
     """
-    ddg_query = f'site:instagram.com/reel "{query}"'
-    results = ddgs_search(ddg_query, max_results=30)
+    ddg_query = f'site:instagram.com/reel {query}'
+    try:
+        results = ddg(ddg_query, max_results=30)
+    except Exception:
+        return []
     links = []
-    for r in results:
-        url = r.get("href") or r.get("url")
+    for r in results or []:
+        url = r.get("href")
         if url and "instagram.com" in url and ("/reel/" in url or "/p/" in url):
             links.append(url)
         if len(links) >= 5:
@@ -118,17 +112,18 @@ def instagram_search(query):
 
 # --- WEEKLY UPDATE GENERATION ---
 TOOL_MAP = {
-    "YouTube": ("youtube_search", youtube_search),
-    "TikTok": ("tiktok_search", tiktok_search),
-    "Instagram Reel": ("instagram_search", instagram_search),
-    "Research News": ("websearch", websearch)
+    "YouTube":       ("youtube_search", youtube_search),
+    "TikTok":        ("tiktok_search", tiktok_search),
+    "Instagram Reel":("instagram_search", instagram_search),
+    "Research News": ("websearch", websearch),
 }
+
 PRIMARIES_WITH_FALLBACK = {"youtube_search", "tiktok_search", "instagram_search"}
 
 def agent_weekly_update(func_name, condition):
     prompt = (
-        f"Generate exactly three unique search phrases including '{condition}' using only {func_name}."
-        " Return one phrase per line, no code syntax."
+        f"Generate exactly three unique search phrases including '{condition}' using only {func_name}. "
+        "Return one phrase per line, no code syntax."
     )
     resp = generate(
         model="4o-mini",
@@ -150,14 +145,16 @@ def weekly_update_internal(user):
     condition = sess.get("condition") or session_dict["test_user"]["condition"]
     func_name, func = TOOL_MAP.get(pref, ("websearch", websearch))
 
+    # Step 1: generate 3 search phrases
     raw = agent_weekly_update(func_name, condition)
     queries = []
-    for line in raw.splitlines():
+    for line in (raw or "").splitlines():
         phrase = line.strip().strip('"')
         if phrase and phrase not in queries:
             queries.append(phrase)
     queries = queries[:3]
 
+    # Step 2: execute each, with fallback for site-specific
     results = []
     for q in queries:
         try:
@@ -170,6 +167,7 @@ def weekly_update_internal(user):
             top = f"Error fetching results: {e}"
         results.append({"query": q, "link": top})
 
+    # pad if fewer than 3
     while len(results) < 3:
         results.append({"query": condition, "link": "No call generated"})
 
@@ -205,14 +203,14 @@ def main():
 
     if message.lower() == "weekly update":
         buttons = [
-            {"type": "button", "text": "🎥 YouTube",        "msg": "YouTube",        "msg_in_chat_window": True},
-            {"type": "button", "text": "📸 Instagram Reel", "msg": "Instagram Reel", "msg_in_chat_window": True},
-            {"type": "button", "text": "🎵 TikTok",         "msg": "TikTok",         "msg_in_chat_window": True},
-            {"type": "button", "text": "🧪 Research News",  "msg": "Research News",  "msg_in_chat_window": True}
+            {"type":"button","text":"🎥 YouTube",       "msg":"YouTube",        "msg_in_chat_window":True},
+            {"type":"button","text":"📸 Instagram Reel","msg":"Instagram Reel", "msg_in_chat_window":True},
+            {"type":"button","text":"🎵 TikTok",        "msg":"TikTok",         "msg_in_chat_window":True},
+            {"type":"button","text":"🧪 Research News", "msg":"Research News",  "msg_in_chat_window":True},
         ]
         return jsonify({
             "text": "Choose your weekly-update content type:",
-            "attachments": [{"collapsed": False, "color": "#e3e3e3", "actions": buttons}]
+            "attachments":[{"collapsed":False,"color":"#e3e3e3","actions":buttons}]
         })
 
     if message in TOOL_MAP:
@@ -224,13 +222,14 @@ def main():
     if session_dict[user].get("onboarding_stage") != "done":
         response = first_interaction(message, user)
     else:
-        response = {"text": "You're onboarded! Type 'weekly update' to choose content and get your digest."}
+        response = {"text":"You're onboarded! Type 'weekly update' to choose content and get your digest."}
 
     save_sessions(session_dict)
     return jsonify(response)
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001)
+
 
 
 
