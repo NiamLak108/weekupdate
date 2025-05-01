@@ -17,6 +17,7 @@ def load_sessions():
 def save_sessions(sessions):
     with open(SESSION_FILE, "w") as f:
         json.dump(sessions, f, indent=4)
+
 session_dict = load_sessions()
 def _init_test_user():
     session_dict.setdefault("test_user", {
@@ -36,22 +37,24 @@ def websearch(query):
     links = []
     for r in results:
         url = r.get("href") or r.get("url")
-        if not url or "duckduckgo.com" in url: continue
+        if not url or "duckduckgo.com" in url:
+            continue
         links.append(url)
-        if len(links) >= 5: break
+        if len(links) >= 5:
+            break
     return links
 
 def youtube_search(query):
     """
     Only fetch actual YouTube video URLs matching the query.
     """
-    ddg_query = f"site:youtube.com/watch {query}"
+    # wrap the query in quotes for exact-phrase matching
+    ddg_query = f'site:youtube.com/watch "{query}"'
     with DDGS() as ddgs:
         results = ddgs.text(ddg_query, max_results=30)
     links = []
     for r in results:
         url = r.get("href") or r.get("url")
-        # must be a video watch page
         if url and ("youtube.com/watch" in url or "youtu.be/" in url):
             links.append(url)
         if len(links) >= 5:
@@ -62,13 +65,12 @@ def tiktok_search(query):
     """
     Only fetch TikTok video URLs matching the query.
     """
-    ddg_query = f"site:tiktok.com/video {query}"
+    ddg_query = f'site:tiktok.com/video "{query}"'
     with DDGS() as ddgs:
         results = ddgs.text(ddg_query, max_results=30)
     links = []
     for r in results:
         url = r.get("href") or r.get("url")
-        # must be a direct video link
         if url and "/video/" in url and "tiktok.com" in url:
             links.append(url)
         if len(links) >= 5:
@@ -79,13 +81,12 @@ def instagram_search(query):
     """
     Only fetch Instagram Reel or post URLs matching the query.
     """
-    ddg_query = f"site:instagram.com/reel {query}"
+    ddg_query = f'site:instagram.com/reel "{query}"'
     with DDGS() as ddgs:
         results = ddgs.text(ddg_query, max_results=30)
     links = []
     for r in results:
         url = r.get("href") or r.get("url")
-        # reel or post
         if url and "instagram.com" in url and ("/reel/" in url or "/p/" in url):
             links.append(url)
         if len(links) >= 5:
@@ -126,7 +127,6 @@ def weekly_update_internal(user):
     condition = sess.get("condition") or session_dict["test_user"]["condition"]
     func_name, func = TOOL_MAP.get(pref, ("websearch", websearch))
 
-    # Step 1: generate 3 phrases
     raw = agent_weekly_update(func_name, condition)
     queries = []
     for line in raw.splitlines():
@@ -135,12 +135,10 @@ def weekly_update_internal(user):
             queries.append(phrase)
     queries = queries[:3]
 
-    # Step 2: fetch each
     results = []
     for q in queries:
         try:
             links = func(q)
-            # fallback only for the site-limited ones
             if not links and func_name in PRIMARIES_WITH_FALLBACK:
                 domain = func_name.replace('_search', '') + ".com"
                 links = websearch(f"{q} site:{domain}")
@@ -149,7 +147,6 @@ def weekly_update_internal(user):
             top = f"Error fetching results: {e}"
         results.append({"query": q, "link": top})
 
-    # pad if <3
     while len(results) < 3:
         results.append({"query": condition, "link": "No call generated"})
 
@@ -211,10 +208,6 @@ def main():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001)
-
-
-
-
 
 
 
