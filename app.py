@@ -1,4 +1,5 @@
 import os
+import time
 import json
 from flask import Flask, request, jsonify
 from llmproxy import generate
@@ -6,19 +7,24 @@ from duckduckgo_search import DDGS
 
 app = Flask(__name__)
 
-# --- SESSION MANAGEMENT (unchanged) ---
+# --- SESSION MANAGEMENT ---
 SESSION_FILE = "session_store.json"
+
 def load_sessions():
     if os.path.exists(SESSION_FILE):
         with open(SESSION_FILE, "r") as f:
-            try: return json.load(f)
-            except json.JSONDecodeError: return {}
+            try:
+                return json.load(f)
+            except json.JSONDecodeError:
+                return {}
     return {}
+
 def save_sessions(sessions):
     with open(SESSION_FILE, "w") as f:
         json.dump(sessions, f, indent=4)
 
 session_dict = load_sessions()
+
 def _init_test_user():
     session_dict.setdefault("test_user", {
         "session_id": "test_user-session",
@@ -28,12 +34,33 @@ def _init_test_user():
         "news_sources": ["bbc.com", "nytimes.com"]
     })
     save_sessions(session_dict)
+
 _init_test_user()
+
+# --- PERSISTENT DDGS SESSION & RATE-LIMIT HELPERS ---
+ddgs = DDGS()
+
+def ddgs_search(query, max_results=20, retries=3):
+    """
+    Wrapper around ddgs.text that retries with exponential backoff on rate-limit.
+    """
+    for attempt in range(retries):
+        try:
+            return ddgs.text(query, max_results=max_results)
+        except Exception as e:
+            if "Ratelimit" in str(e):
+                time.sleep(2 ** attempt)
+                continue
+            else:
+                raise
+    return []
 
 # --- TOOL FUNCTIONS ---
 def websearch(query):
-    with DDGS() as ddgs:
-        results = ddgs.text(query, max_results=20)
+    """
+    Perform a DuckDuckGo text search and return up to 5 external URLs.
+    """
+    results = ddgs_search(query, max_results=20)
     links = []
     for r in results:
         url = r.get("href") or r.get("url")
@@ -48,10 +75,8 @@ def youtube_search(query):
     """
     Only fetch actual YouTube video URLs matching the query.
     """
-    # wrap the query in quotes for exact-phrase matching
     ddg_query = f'site:youtube.com/watch "{query}"'
-    with DDGS() as ddgs:
-        results = ddgs.text(ddg_query, max_results=30)
+    results = ddgs_search(ddg_query, max_results=30)
     links = []
     for r in results:
         url = r.get("href") or r.get("url")
@@ -66,8 +91,7 @@ def tiktok_search(query):
     Only fetch TikTok video URLs matching the query.
     """
     ddg_query = f'site:tiktok.com/video "{query}"'
-    with DDGS() as ddgs:
-        results = ddgs.text(ddg_query, max_results=30)
+    results = ddgs_search(ddg_query, max_results=30)
     links = []
     for r in results:
         url = r.get("href") or r.get("url")
@@ -82,8 +106,7 @@ def instagram_search(query):
     Only fetch Instagram Reel or post URLs matching the query.
     """
     ddg_query = f'site:instagram.com/reel "{query}"'
-    with DDGS() as ddgs:
-        results = ddgs.text(ddg_query, max_results=30)
+    results = ddgs_search(ddg_query, max_results=30)
     links = []
     for r in results:
         url = r.get("href") or r.get("url")
@@ -93,7 +116,7 @@ def instagram_search(query):
             break
     return links
 
-# --- WEEKLY UPDATE GENERATION (unchanged) ---
+# --- WEEKLY UPDATE GENERATION ---
 TOOL_MAP = {
     "YouTube": ("youtube_search", youtube_search),
     "TikTok": ("tiktok_search", tiktok_search),
@@ -154,7 +177,7 @@ def weekly_update_internal(user):
     text += "\n".join(f"• {r['query']}: {r['link']}" for r in results)
     return {"text": text, "results": results}
 
-# --- ONBOARDING & MAIN ROUTE (unchanged) ---
+# --- ONBOARDING & MAIN ROUTE ---
 def first_interaction(message, user):
     return {"text": "..."}
 
@@ -182,10 +205,10 @@ def main():
 
     if message.lower() == "weekly update":
         buttons = [
-            {"type": "button", "text": "🎥 YouTube",       "msg": "YouTube",       "msg_in_chat_window": True},
-            {"type": "button", "text": "📸 Instagram Reel","msg": "Instagram Reel","msg_in_chat_window": True},
-            {"type": "button", "text": "🎵 TikTok",        "msg": "TikTok",        "msg_in_chat_window": True},
-            {"type": "button", "text": "🧪 Research News", "msg": "Research News", "msg_in_chat_window": True}
+            {"type": "button", "text": "🎥 YouTube",        "msg": "YouTube",        "msg_in_chat_window": True},
+            {"type": "button", "text": "📸 Instagram Reel", "msg": "Instagram Reel", "msg_in_chat_window": True},
+            {"type": "button", "text": "🎵 TikTok",         "msg": "TikTok",         "msg_in_chat_window": True},
+            {"type": "button", "text": "🧪 Research News",  "msg": "Research News",  "msg_in_chat_window": True}
         ]
         return jsonify({
             "text": "Choose your weekly-update content type:",
@@ -208,6 +231,7 @@ def main():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001)
+
 
 
 
