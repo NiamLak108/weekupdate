@@ -2,7 +2,6 @@ import os
 import re
 import json
 import requests
-from bs4 import BeautifulSoup
 from flask import Flask, request, jsonify
 from llmproxy import generate
 from duckduckgo_search import DDGS
@@ -21,15 +20,12 @@ def load_sessions():
                 return {}
     return {}
 
-
 def save_sessions(sessions):
     with open(SESSION_FILE, "w") as f:
         json.dump(sessions, f, indent=4)
 
-# Load or initialize the sessions dict
 session_dict = load_sessions()
 
-# --- DUMMY TEST USER (skip onboarding) ---
 def _init_test_user():
     session_dict.setdefault("test_user", {
         "session_id": "test_user-session",
@@ -54,14 +50,13 @@ def websearch(query):
         return []
     links = []
     for r in results:
-        url = r.get("href") or r.get("link")
+        url = r.get("href") or r.get("url")
         if not url or "duckduckgo.com" in url:
             continue
         links.append(url)
         if len(links) >= 5:
             break
     return links
-
 
 def youtube_search(query):
     """
@@ -74,15 +69,12 @@ def youtube_search(query):
         return []
     links = []
     for r in results:
-        url = r.get("href") or r.get("link")
-        if not url or "duckduckgo.com" in url:
-            continue
-        if "youtube.com" in url:
+        url = r.get("href") or r.get("url")
+        if url and "youtube.com" in url:
             links.append(url)
         if len(links) >= 5:
             break
     return links
-
 
 def tiktok_search(query):
     """
@@ -95,15 +87,12 @@ def tiktok_search(query):
         return []
     links = []
     for r in results:
-        url = r.get("href") or r.get("link")
-        if not url or "duckduckgo.com" in url:
-            continue
-        if "tiktok.com" in url:
+        url = r.get("href") or r.get("url")
+        if url and "tiktok.com" in url:
             links.append(url)
         if len(links) >= 5:
             break
     return links
-
 
 def instagram_search(query):
     """
@@ -116,10 +105,8 @@ def instagram_search(query):
         return []
     links = []
     for r in results:
-        url = r.get("href") or r.get("link")
-        if not url or "duckduckgo.com" in url:
-            continue
-        if "instagram.com" in url:
+        url = r.get("href") or r.get("url")
+        if url and "instagram.com" in url:
             links.append(url)
         if len(links) >= 5:
             break
@@ -133,11 +120,10 @@ TOOL_MAP = {
     "Research News": ("websearch", websearch)
 }
 
+# Only these get a site:fallback
+PRIMARIES_WITH_FALLBACK = {"youtube_search", "tiktok_search", "instagram_search"}
+
 def agent_weekly_update(func_name, condition):
-    """
-    Prompt the LLM to generate exactly three unique search phrases including the condition,
-    without code syntax.
-    """
     prompt = (
         f"Generate exactly three unique search phrases including '{condition}' using only {func_name}."
         f" Return one phrase per line, no code syntax."
@@ -153,20 +139,17 @@ def agent_weekly_update(func_name, condition):
     )
     return resp.get("response", "")
 
-
 def weekly_update_internal(user):
     sess = session_dict.get(user)
     if not sess:
         return {"text": "User not found."}
 
     pref = sess.get("news_pref")
-    condition = sess.get("condition") or session_dict.get("test_user", {}).get("condition", "")
+    condition = sess.get("condition") or session_dict["test_user"]["condition"]
     func_name, func = TOOL_MAP.get(pref, ("websearch", websearch))
 
-    # Step 1: generate raw search phrases
+    # generate 3 phrases
     raw = agent_weekly_update(func_name, condition)
-
-    # Step 2: extract bare phrases and dedupe
     queries = []
     for line in raw.splitlines():
         phrase = line.strip().strip('"')
@@ -174,29 +157,31 @@ def weekly_update_internal(user):
             queries.append(phrase)
     queries = queries[:3]
 
-    # Step 3: execute queries with fallback
+    # run searches
     results = []
     for q in queries:
         try:
             links = func(q)
-            if not links:
-                # fallback to websearch with site: filter
+            # only do site: fallback for the site-specific searches
+            if not links and func_name in PRIMARIES_WITH_FALLBACK:
                 domain = func_name.replace('_search', '') + ".com"
-                fallback_q = f"{q} site:{domain}"
-                links = websearch(fallback_q)
+                links = websearch(f"{q} site:{domain}")
             top = links[0] if links else "No results found"
         except Exception as e:
             top = f"Error fetching results: {e}"
         results.append({"query": q, "link": top})
 
-    # Pad to three
+    # pad to three if needed
     while len(results) < 3:
         results.append({"query": condition, "link": "No call generated"})
 
-    # Format output
     text_lines = [f"• {r['query']}: {r['link']}" for r in results]
-    return {"text": "Here is your weekly health content digest with 3 unique searches:\n" + "\n".join(text_lines),
-            "results": results}
+    return {
+        "text": "Here is your weekly health content digest with 3 unique searches:\n"
+                + "\n".join(text_lines),
+        "results": results
+    }
+
 
 # --- ONBOARDING FUNCTIONS ---
 def first_interaction(message, user):
