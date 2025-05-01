@@ -1,5 +1,4 @@
 import os
-import time
 import json
 from flask import Flask, request, jsonify
 from llmproxy import generate
@@ -37,25 +36,25 @@ def _init_test_user():
 
 _init_test_user()
 
-# --- PERSISTENT DDGS SESSION & BACKOFF WRAPPER ---
+# --- PERSISTENT DDGS SESSION & SIMPLE WRAPPER ---
 ddgs = DDGS()
 
-def ddgs_search(query, max_results=20, retries=3):
-    for attempt in range(retries):
-        try:
-            return ddgs.text(query, max_results=max_results)
-        except Exception as e:
-            if "Ratelimit" in str(e):
-                time.sleep(2 ** attempt)
-                continue
-            raise
-    return []
+def ddgs_search(query, max_results=20):
+    """
+    Run ddgs.text once; on any rate-limit, return [] immediately.
+    """
+    try:
+        return ddgs.text(query, max_results=max_results) or []
+    except Exception as e:
+        if "Ratelimit" in str(e):
+            return []
+        raise
 
 # --- TOOL FUNCTIONS ---
 def websearch(query):
     results = ddgs_search(query, max_results=20)
     links = []
-    for r in results or []:
+    for r in results:
         url = r.get("href") or r.get("url")
         if not url or "duckduckgo.com" in url:
             continue
@@ -68,7 +67,7 @@ def youtube_search(query):
     ddg_query = f'site:youtube.com/watch "{query}"'
     results = ddgs_search(ddg_query, max_results=30)
     links = []
-    for r in results or []:
+    for r in results:
         url = r.get("href") or r.get("url")
         if url and ("youtube.com/watch" in url or "youtu.be/" in url):
             links.append(url)
@@ -80,7 +79,7 @@ def tiktok_search(query):
     ddg_query = f'site:tiktok.com/video "{query}"'
     results = ddgs_search(ddg_query, max_results=30)
     links = []
-    for r in results or []:
+    for r in results:
         url = r.get("href") or r.get("url")
         if url and "tiktok.com" in url and "/video/" in url:
             links.append(url)
@@ -92,7 +91,7 @@ def instagram_search(query):
     ddg_query = f'site:instagram.com/reel "{query}"'
     results = ddgs_search(ddg_query, max_results=30)
     links = []
-    for r in results or []:
+    for r in results:
         url = r.get("href") or r.get("url")
         if url and "instagram.com" in url and ("/reel/" in url or "/p/" in url):
             links.append(url)
@@ -147,8 +146,7 @@ def weekly_update_internal(user):
         try:
             links = func(q)
             if not links and func_name in PRIMARIES_WITH_FALLBACK:
-                fallback = websearch(f"{q} site:{func_name.replace('_search','')}.com")
-                links = fallback
+                links = websearch(f"{q} site:{func_name.replace('_search','')}.com")
             top = links[0] if links else "No results found"
         except Exception as e:
             top = f"Error fetching results: {e}"
@@ -215,6 +213,7 @@ def main():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001)
+
 
 
 
