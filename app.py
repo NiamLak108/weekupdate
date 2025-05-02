@@ -64,7 +64,11 @@ def websearch(query):
     return links
 
 def youtube_search(query):
-    ddg_query = f'site:youtube.com/watch "{query}"'
+    """
+    Only fetch actual YouTube video URLs matching the query.
+    (removed the quotes around {query})
+    """
+    ddg_query = f'site:youtube.com/watch {query}'
     results = ddgs_search(ddg_query, max_results=30)
     links = []
     for r in results:
@@ -76,7 +80,11 @@ def youtube_search(query):
     return links
 
 def tiktok_search(query):
-    ddg_query = f'site:tiktok.com/video "{query}"'
+    """
+    Only fetch TikTok video URLs matching the query.
+    (removed the quotes around {query})
+    """
+    ddg_query = f'site:tiktok.com/video {query}'
     results = ddgs_search(ddg_query, max_results=30)
     links = []
     for r in results:
@@ -88,7 +96,11 @@ def tiktok_search(query):
     return links
 
 def instagram_search(query):
-    ddg_query = f'site:instagram.com/reel "{query}"'
+    """
+    Only fetch Instagram Reel or post URLs matching the query.
+    (removed the quotes around {query})
+    """
+    ddg_query = f'site:instagram.com/reel {query}'
     results = ddgs_search(ddg_query, max_results=30)
     links = []
     for r in results:
@@ -213,6 +225,7 @@ def main():
 
 if __name__ == "__main__":
     app.run(host="0.0.0.0", port=5001)
+
 
 
 
