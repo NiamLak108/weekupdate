@@ -196,7 +196,7 @@ def main():
         session_dict[user]["news_pref"] = message
         session_dict[user]["onboarding_stage"] = "done"
         save_sessions(session_dict)
-        return jsonify(weekly_update_internal(user))
+        return jsonify(weekly_update_main(user))
 
     if session_dict[user].get("onboarding_stage") != "done":
         response = first_interaction(message, user)
