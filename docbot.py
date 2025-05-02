@@ -19,69 +19,6 @@ from instr import daily_system_template, general_system_template
 app = Flask(__name__)
 
 
-# --- WEEKLY UPDATE FUNCTION ---
-def agent_weekly_update(user_info, health_info):
-    """
-    Create a system message using the user and health info, then call the LLM agent.
-    The agent returns a tool call (e.g., youtube_search("gut health smoothies")).
-    """
-    system = f"""
-    You are an AI agent designed to handle weekly health content updates for users with specific health conditions.
-
-    In addition to your own intelligence, you are given access to a set of tools that let you fetch personalized health content from various online platforms.
-
-    Your job is to use the right tool to deliver a helpful and engaging content recommendation **based on the user's health condition and preferences**.
-
-    Think step-by-step about which platform is best for this week's update, and then return the correct tool call using the examples provided.
-
-    ONLY respond with a tool call like: youtube_search("gut health smoothies")
-
-    ### USER INFORMATION ###
-    - Name: {user_info.get('name')}
-    - Health condition: {health_info.get('condition')}
-    - Preferred platform: {user_info.get('news_pref')}
-    - Preferred news sources: {", ".join(user_info.get('news_sources', []))}
-
-    ### PROVIDED TOOLS INFORMATION ###
-
-    ##1. Tool to perform a YouTube video search
-    Name: youtube_search
-    Parameters: query
-    Example usage: youtube_search("crohn's anti-inflammatory meals")
-
-    ##2. Tool to search TikTok for short-form video content
-    Name: tiktok_search
-    Parameters: query
-    Example usage: tiktok_search("what I eat with IBS")
-
-    ##3. Tool to search Instagram posts/reels via hashtags
-    Name: instagram_search
-    Parameters: query
-    Example usage: instagram_search("gut healing routine")
-
-    ##4. Tool to perform a websearch using DuckDuckGo
-    Name: websearch
-    Parameters: query
-    Example usage: websearch("best probiotics for gut health site:bbc.com")
-    Example usage: websearch("latest Crohn's breakthroughs site:nytimes.com")
-
-    ONLY respond with one tool call. Do NOT explain or add any extra text.
-    Make your query specific, relevant to the condition, and useful.
-
-    Each time you search, make sure the search query is different from the previous week's content.
-    """
-    response = generate(
-        model='4o-mini',
-        system=system,
-        query="What should I send this user this week?",
-        temperature=0.9,
-        lastk=10,
-        session_id='HEALTH_UPDATE_AGENT',
-        rag_usage=False
-    )
-    print(f"🔍 Raw agent response: {response}")
-    return response['response']
-
 
 
 # --- WEEKLY UPDATE INTERNAL HELPER ---
@@ -126,29 +63,6 @@ def weekly_update_internal(message, user, session_dict):
         "condition": user_session.get("condition", "unknown condition")
     }
     
-    try:
-        agent_response = agent_weekly_update(user_info, health_info)
-        print(f"✅ Final agent response: {agent_response}")
-
-        tool_call = extract_tool(agent_response)
-
-        if not tool_call:
-            print("⚠️ No valid tool call found. Using fallback.")
-            condition = health_info.get("condition")
-            pref = user_info.get("news_pref", "Research News").lower()
-            tool_map = {
-                'youtube': f'youtube_search("{condition} tips")',
-                'tiktok': f'tiktok_search("{condition} tips")',
-                'instagram reel': f'instagram_search("{condition} tips")',
-                'research news': f'websearch("{condition} tips")'
-            }
-            key = pref if pref in tool_map else "research news"
-            tool_call = tool_map.get(key)
-
-        print(f"🔁 Final tool to execute: {tool_call}")
-        results = eval(tool_call)
-        output = "\n".join(f"• {item}" for item in results)
-        text_response = f"Here is your weekly health content digest\n{tool_call}:\n{output}"
         
         # Reset news preference for next time
         session_dict[user]["news_pref"] = "reset"
