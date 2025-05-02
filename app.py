@@ -118,7 +118,7 @@ def agent_weekly_update(func_name, condition):
     )
     return resp.get("response", "")
 
-def weekly_update_internal(user):
+def weekly_update_main(user):
     sess = session_dict.get(user)
     if not sess:
         return {"text": "User not found."}
